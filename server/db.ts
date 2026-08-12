@@ -1,7 +1,15 @@
-import { eq } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users } from "../drizzle/schema";
-import { ENV } from './_core/env';
+import {
+  bookings,
+  courts,
+  InsertBooking,
+  InsertUser,
+  rateTiers,
+  users,
+  venues,
+} from "../drizzle/schema";
+import { ENV } from "./_core/env";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -30,9 +38,7 @@ export async function upsertUser(user: InsertUser): Promise<void> {
   }
 
   try {
-    const values: InsertUser = {
-      openId: user.openId,
-    };
+    const values: InsertUser = { openId: user.openId };
     const updateSet: Record<string, unknown> = {};
 
     const textFields = ["name", "email", "loginMethod"] as const;
@@ -56,8 +62,8 @@ export async function upsertUser(user: InsertUser): Promise<void> {
       values.role = user.role;
       updateSet.role = user.role;
     } else if (user.openId === ENV.ownerOpenId) {
-      values.role = 'admin';
-      updateSet.role = 'admin';
+      values.role = "admin";
+      updateSet.role = "admin";
     }
 
     if (!values.lastSignedIn) {
@@ -68,9 +74,7 @@ export async function upsertUser(user: InsertUser): Promise<void> {
       updateSet.lastSignedIn = new Date();
     }
 
-    await db.insert(users).values(values).onDuplicateKeyUpdate({
-      set: updateSet,
-    });
+    await db.insert(users).values(values).onDuplicateKeyUpdate({ set: updateSet });
   } catch (error) {
     console.error("[Database] Failed to upsert user:", error);
     throw error;
@@ -89,4 +93,172 @@ export async function getUserByOpenId(openId: string) {
   return result.length > 0 ? result[0] : undefined;
 }
 
-// TODO: add feature queries here as your schema grows.
+// ---------------- Feature queries ----------------
+
+export async function listVenues() {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return db.select().from(venues).orderBy(asc(venues.name));
+}
+
+export async function getVenueById(id: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const rows = await db.select().from(venues).where(eq(venues.id, id)).limit(1);
+  return rows[0];
+}
+
+export async function listCourtsByVenue(venueId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return db.select().from(courts).where(eq(courts.venueId, venueId)).orderBy(asc(courts.courtNumber));
+}
+
+export async function listRateTiersByVenue(venueId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return db.select().from(rateTiers).where(eq(rateTiers.venueId, venueId));
+}
+
+export async function listRateTiers() {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return db.select().from(rateTiers);
+}
+
+/** Bookings for given venue + date (all courts), returns raw rows. */
+export async function listBookingsForVenueDate(venueId: number, playerDate: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return db
+    .select()
+    .from(bookings)
+    .where(
+      and(
+        eq(bookings.venueId, venueId),
+        eq(bookings.playerDate, playerDate),
+        inArray(bookings.paymentStatus, ["pending", "paid"]),
+      ),
+    )
+    .orderBy(asc(bookings.startHour));
+}
+
+/** All bookings, newest first, with optional channel filter. */
+export async function listAllBookings(opts?: { channel?: "online" | "walkin"; limit?: number }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const conditions = [];
+  if (opts?.channel) conditions.push(eq(bookings.channel, opts.channel));
+  return db
+    .select()
+    .from(bookings)
+    .where(conditions.length ? and(...conditions) : undefined)
+    .orderBy(desc(bookings.createdAt))
+    .limit(opts?.limit ?? 200);
+}
+
+export async function getBookingByReference(reference: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const rows = await db.select().from(bookings).where(eq(bookings.reference, reference)).limit(1);
+  return rows[0];
+}
+
+export async function getBookingById(id: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const rows = await db.select().from(bookings).where(eq(bookings.id, id)).limit(1);
+  return rows[0];
+}
+
+/** Check for conflicting booking on the same court + date + overlapping hours. */
+export async function findConflictingBooking(
+  courtId: number,
+  playerDate: string,
+  startHour: string,
+  endHour: string,
+  excludeBookingId?: number,
+) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return db
+    .select()
+    .from(bookings)
+    .where(
+      and(
+        eq(bookings.courtId, courtId),
+        eq(bookings.playerDate, playerDate),
+        inArray(bookings.paymentStatus, ["pending", "paid"]),
+        sql`${bookings.startHour} < ${endHour}`,
+        sql`${bookings.endHour} > ${startHour}`,
+        ...(excludeBookingId ? [sql`${bookings.id} != ${excludeBookingId}`] : []),
+      ),
+    )
+    .limit(1);
+}
+
+export async function insertBooking(data: InsertBooking) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const result = await db.insert(bookings).values(data);
+  return result;
+}
+
+export async function updateBookingStatus(
+  id: number,
+  patch: Partial<
+    Pick<
+      InsertBooking,
+      | "paymentStatus"
+      | "paymentMethod"
+      | "playerName"
+      | "contact"
+      | "dayAmount"
+      | "nightAmount"
+      | "totalAmount"
+      | "courtId"
+      | "playerDate"
+      | "startHour"
+      | "endHour"
+    >
+  >,
+) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.update(bookings).set(patch).where(eq(bookings.id, id));
+}
+
+/** Convert "HH:MM" to minutes since midnight (for slot expansion). */
+export function toMinutesForSlot(hhmm: string): number {
+  const [h, m] = hhmm.split(":").map(Number);
+  return h * 60 + (m || 0);
+}
+
+/** Convert minutes since midnight to "HH:MM". */
+export function hhmmFromMinutes(mins: number): string {
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+/** Update court operational status. */
+export async function setCourtStatus(courtId: number, status: "available" | "maintenance") {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.update(courts).set({ status }).where(eq(courts.id, courtId));
+}
+
+/** Generate a unique reference like DV-PB-8A3K. */
+export async function generateReference(): Promise<string> {
+  let ref: string;
+  let attempts = 0;
+  do {
+    const chars = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+    let code = "DV-PB-";
+    for (let i = 0; i < 4; i++) code += chars[Math.floor(Math.random() * chars.length)];
+    ref = code;
+    attempts++;
+    if (attempts > 10) throw new Error("Failed to generate unique reference");
+  } while ((await getBookingByReference(ref)) !== undefined);
+  return ref;
+}
