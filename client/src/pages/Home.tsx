@@ -185,7 +185,7 @@ export default function Home() {
           </div>
 
           {venuesError ? (
-            <p className="mt-8 text-sm text-destructive">Unable to load venues. Please try again shortly.</p>
+            <p className="mt-8 text-sm text-destructive">Unable to load venues: {venuesError.message}. Please try again shortly.</p>
           ) : isLoading ? (
             <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {Array.from({ length: 6 }).map((_, i) => (

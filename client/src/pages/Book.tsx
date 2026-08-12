@@ -12,7 +12,7 @@ import {
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { formatHour, formatPHP } from "@shared/rates";
-import { Moon, ReceiptText, Sun } from "lucide-react";
+import { Clock, Moon, ReceiptText, Sun } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useLocation, useSearch } from "wouter";
 import { trpc } from "@/lib/trpc";
@@ -23,7 +23,7 @@ export default function Book() {
   const search = useSearch();
   const { setDraft, draft } = useBooking();
 
-  const { data: venues } = trpc.venues.list.useQuery(undefined, { refetchOnWindowFocus: false });
+  const { data: venues, isLoading: venuesLoading, error: venuesError } = trpc.venues.list.useQuery(undefined, { refetchOnWindowFocus: false });
 
   const params = useMemo(() => new URLSearchParams(search), [search]);
   const initVenue = Number(params.get("venueId")) || draft.venueId;
@@ -73,12 +73,12 @@ export default function Book() {
 
   const venue = venues?.find(v => v.id === venueId);
 
-  // Available start hours for chosen date: must fit duration & not overlap bookings
+  // Hooks must run on every render — compute before any early return.
   const startOptions = useMemo(() => {
-    if (!availability.data || !startHour === null) return availability.data?.slots ?? [];
+    if (!availability.data || startHour === null) return availability.data?.slots ?? [];
     return availability.data.slots.filter(slotStart => {
       const end = toMin(slotStart) + duration * 60;
-      if (end > toMin(availability.data.venue.closeTime) + (availability.data.venue.closeTime === "00:00" ? 0 : 0)) return false;
+      if (end > toMin(availability.data.venue.closeTime)) return false;
       const c = availability.data.courts.find(c => c.id === courtId);
       if (!c) return false;
       for (let t = toMin(slotStart); t + 60 <= end; t += 60) {
@@ -88,7 +88,29 @@ export default function Book() {
       return true;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [availability.data, courtId, duration]);
+  }, [availability.data, courtId, duration, startHour]);
+
+  if (venuesLoading) {
+    return (
+      <div className="container py-16">
+        <div className="mx-auto max-w-md rounded-lg border border-border bg-background p-10 text-center">
+          <Clock className="mx-auto h-8 w-8 animate-spin text-primary" />
+          <p className="mt-4 text-sm text-muted-foreground">Loading venues…</p>
+        </div>
+      </div>
+    );
+  }
+  if (venuesError || (venues ?? []).length === 0) {
+    return (
+      <div className="container py-16">
+        <div className="mx-auto max-w-md rounded-lg border border-border bg-background p-10 text-center">
+          <p className="text-sm text-destructive">Unable to load venues. Please try again shortly.</p>
+        </div>
+      </div>
+    );
+  }
+
+
 
   const submit = () => {
     if (!playerName.trim()) {

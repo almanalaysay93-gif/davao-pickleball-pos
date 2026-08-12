@@ -29,16 +29,16 @@ import {
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Badge } from "@/components/ui/badge";
 import { startLogin } from "@/const";
-import { formatHour, formatPHP } from "@shared/rates";
+import { formatHour, formatPHP, priceSlot } from "@shared/rates";
 import { BadgeCheck, BadgeX, Clock, DoorOpen, Loader2, ReceiptText, Wrench, UserPlus } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 
 export default function Admin() {
-  const { user, loading } = useAuth();
+  const { user, loading: authLoading } = useAuth();
 
-  if (loading) {
+  if (authLoading) {
     return (
       <div className="container py-24 flex flex-col items-center gap-3">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -318,10 +318,47 @@ function ModifyDialog({ bookingId }: { bookingId: number }) {
   const rows = detail.data ?? [];
   const target = rows.find(r => r.id === bookingId);
 
+  // Load the venue's rate tiers so we can validate slot times and preview pricing.
+  const tiersQuery = trpc.rates.byVenue.useQuery(
+    { venueId: target?.venueId ?? 1 },
+    { enabled: open && Boolean(target?.venueId) },
+  );
+  const slots = useMemo(() => {
+    const rows2 = (tiersQuery.data ?? []).map(t => ({ start: t.startHour, end: t.endHour }));
+    return rows2;
+  }, [tiersQuery.data]);
+  const venueOpen = slots[0]?.start ?? "06:00";
+  const venueClose = slots[slots.length - 1]?.end ?? "22:00";
+
+  // Live price preview for the proposed time range.
+  const pricePreview = useMemo(() => {
+    const startOk = /^\d{2}:\d{2}$/.test(newStart);
+    const endOk = /^\d{2}:\d{2}$/.test(newEnd);
+    if (!startOk || !endOk || !(tiersQuery.data ?? []).length) return null;
+    try {
+      return priceSlot(newStart, newEnd, tiersQuery.data!);
+    } catch {
+      return null;
+    }
+  }, [newStart, newEnd, tiersQuery.data]);
+
+  const startValid = useMemo(() => {
+    if (!/^\d{2}:\d{2}$/.test(newStart)) return "Required, HH:MM";
+    if (newStart < venueOpen) return `Venue opens at ${formatHour(venueOpen)}`;
+    return null;
+  }, [newStart, venueOpen]);
+  const endValid = useMemo(() => {
+    if (!/^\d{2}:\d{2}$/.test(newEnd)) return "Required, HH:MM";
+    if (newEnd <= newStart) return "Must be after start time";
+    if (newEnd > venueClose) return `Venue closes at ${formatHour(venueClose === "00:00" ? "24:00" : venueClose)}`;
+    return null;
+  }, [newEnd, newStart, venueClose]);
+
   const modify = trpc.bookings.modify.useMutation({
     onSuccess: () => {
       toast.success("Booking updated");
       utils.bookings.list.invalidate();
+      utils.availability.forVenueDate.invalidate();
       setOpen(false);
     },
     onError: e => toast.error(e.message),
@@ -362,18 +399,29 @@ function ModifyDialog({ bookingId }: { bookingId: number }) {
             <div className="space-y-1.5">
               <Label>New start</Label>
               <Input className="bg-background" placeholder="18:00" value={newStart} onChange={e => setNewStart(e.target.value)} />
+              {startValid && <p className="text-xs text-destructive">{startValid}</p>}
             </div>
             <div className="space-y-1.5">
               <Label>New end</Label>
               <Input className="bg-background" placeholder="20:00" value={newEnd} onChange={e => setNewEnd(e.target.value)} />
+              {endValid && <p className="text-xs text-destructive">{endValid}</p>}
             </div>
           </div>
+          {pricePreview && (
+            <div className="rounded-md border border-border bg-muted/40 p-3 text-xs">
+              <p className="font-medium">New estimated total</p>
+              <p>
+                Daytime: {pricePreview.dayHours} hr × {formatPHP(pricePreview.dayAmount)} · Nighttime: {pricePreview.nightHours} hr × {formatPHP(pricePreview.nightAmount)}
+              </p>
+              <p className="mt-1 font-semibold text-primary">{formatPHP(pricePreview.total)}</p>
+            </div>
+          )}
         </div>
         <DialogFooter>
           <Button variant="outline" className="press bg-transparent" onClick={() => setOpen(false)}>Cancel</Button>
           <Button
             className="press"
-            disabled={modify.isPending}
+            disabled={modify.isPending || Boolean(startValid || endValid) || !newStart || !newEnd}
             onClick={() =>
               modify.mutate({
                 id: bookingId,

@@ -11,7 +11,7 @@ import {
 import { formatDate, formatHour } from "@shared/rates";
 import { format, startOfDay } from "date-fns";
 import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Clock, Search } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLocation, useSearch } from "wouter";
 import { trpc } from "@/lib/trpc";
 
@@ -46,10 +46,15 @@ export default function Schedule() {
   );
 
   // Apply the venue default once when the venue list arrives.
-  if (shouldDefault && venues?.[0]) {
-    setVenueId(venues[0].id);
-  }
+  useEffect(() => {
+    if (!venueId && !initialVenueId && venues?.[0]) {
+      setVenueId(venues[0].id);
+    }
+  }, [venueId, initialVenueId, venues]);
 
+  const queryError = availability.error;
+
+  // Hooks must run on every render — keep useMemo above any early return.
   const filtered = useMemo(() => {
     const data = availability.data;
     if (!data) return null;
@@ -59,6 +64,29 @@ export default function Schedule() {
     if (timeFilter === "evening") slots = slots.filter(h => toMin(h) >= toMin("18:00"));
     return { ...data, slots };
   }, [availability.data, timeFilter]);
+
+  if (!availability.data && !queryError) {
+    return (
+      <div className="container py-16">
+        <div className="mx-auto max-w-md rounded-lg border border-border bg-background p-10 text-center">
+          <Clock className="mx-auto h-8 w-8 animate-spin text-primary" />
+          <p className="mt-4 text-sm text-muted-foreground">Loading today's schedule…</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (queryError) {
+    return (
+      <div className="container py-16">
+        <div className="mx-auto max-w-md rounded-lg border border-border bg-background p-10 text-center">
+          <p className="text-sm text-destructive">Unable to load the schedule. Please try again shortly.</p>
+        </div>
+      </div>
+    );
+  }
+
+
 
   const changeDay = (delta: number) => {
     const d = new Date(`${playerDate}T12:00:00`);

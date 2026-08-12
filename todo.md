@@ -32,8 +32,8 @@
 - [x] Checkpoint + deliver
 
 ## Gap Fixes
-- [ ] Add live refresh for availability grid (polling every 15s so grids reflect current bookings)
-- [ ] Replace render-time setState in Schedule with useEffect
-- [ ] Fix Admin ModifyDialog to fetch the booking's venue/rate tiers and enable time edits
-- [ ] Walk-in creation: navigate to receipt screen after payment
-- [ ] Add explicit query error UIs across pages
+- [x] Add live refresh for availability grid (polling every 15s so grids reflect current bookings)
+- [x] Replace render-time setState in Schedule with useEffect
+- [x] Fix Admin ModifyDialog to fetch the booking's venue/rate tiers and enable time edits
+- [x] Walk-in creation: navigate to receipt screen after payment
+- [x] Add explicit query error UIs across pages
