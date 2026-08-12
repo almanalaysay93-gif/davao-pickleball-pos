@@ -14,7 +14,7 @@ const navLinks = [
 ];
 
 export default function SiteLayout({ children }: { children: ReactNode }) {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const [location] = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
   const isAdmin = user?.role === "admin";
@@ -81,6 +81,26 @@ export default function SiteLayout({ children }: { children: ReactNode }) {
           </nav>
 
           <div className="flex items-center gap-2">
+            {user ? (
+              <div className="flex items-center gap-2">
+                <span className="hidden md:flex items-center gap-2 text-sm text-muted-foreground">
+                  <UserRound className="h-4 w-4" />
+                  <span className="max-w-28 truncate">{user.name ?? user.email}</span>
+                </span>
+                <Button variant="outline" size="sm" onClick={() => logout()}>
+                  Sign Out
+                </Button>
+              </div>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                className="hidden sm:inline-flex border-primary/40 text-primary hover:bg-primary/10"
+                onClick={() => startLogin()}>
+                <UserRound className="h-4 w-4 mr-1" />
+                Sign In
+              </Button>
+            )}
             <Link href="/book">
               <Button className="hidden sm:inline-flex press">Book Now</Button>
             </Link>

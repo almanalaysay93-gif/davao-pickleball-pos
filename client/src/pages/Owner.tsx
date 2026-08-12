@@ -78,9 +78,13 @@ export default function Owner() {
             <BadgeX className="h-9 w-9 text-destructive mx-auto" />
             <h2 className="mt-4 font-display text-xl font-semibold">Venue owner access only</h2>
             <p className="mt-2 text-sm text-muted-foreground">
-              Your account is not registered as a venue owner. Contact the system administrator to
-              claim your venue — they can assign ownership to your registered email address.
+              Your account is not yet registered as a venue owner. The system administrator can
+              assign venue ownership to your registered email — just reach out with your venue
+              name and account email.
             </p>
+            <Button variant="outline" className="mt-5 w-full press" onClick={() => startLogin()}>
+              Sign in
+            </Button>
           </CardContent>
         </Card>
       </div>

@@ -518,6 +518,9 @@ export const appRouter = router({
         await db.grantVenueOwnership(dbResult.id, input.venueId);
         return { success: true } as const;
       }),
+
+    /** Admin-only: list all venue ownership assignments. */
+    owners: adminProcedure.query(async () => db.listAllOwners()),
   }),
 });
 

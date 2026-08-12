@@ -65,3 +65,11 @@
 - [x] Announcement banners visible to players: Home, Courts, Schedule, Book pages (scoped per venue + active ones)
 - [x] Vitest coverage for announcements RBAC + owner booking
 - [x] Screenshots verified, checkpoint, deliver
+
+## Owner Login Accessibility
+- [x] Desktop nav: visible Sign In button (previously only in mobile menu)
+- [x] Signed-in users: show profile/greeting with Sign Out in nav
+- [x] Owner self-service: on /owner gate page, clear claim option with Sign In button
+- [x] My Bookings + Owner links discoverable pre-sign-in via Sign In landing info
+- [x] Admin "Venue owners" panel: grant ownership by email + owners list (admin.admin.grantOwnership + admin.owners)
+- [x] Typecheck + tests pass (25/25), checkpoint, deliver

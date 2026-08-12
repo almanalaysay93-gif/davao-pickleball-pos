@@ -30,7 +30,7 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { Badge } from "@/components/ui/badge";
 import { startLogin } from "@/const";
 import { formatHour, formatPHP, priceSlot } from "@shared/rates";
-import { BadgeCheck, BadgeX, Clock, DoorOpen, Loader2, ReceiptText, Wrench, UserPlus } from "lucide-react";
+import { BadgeCheck, BadgeX, Clock, DoorOpen, Loader2, ReceiptText, Wrench, UserPlus, KeyRound } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
@@ -237,6 +237,7 @@ function AdminDashboard() {
       </Card>
 
       <CourtStatusCard />
+      <OwnershipCard />
     </div>
   );
 }
@@ -436,6 +437,141 @@ function ModifyDialog({ bookingId }: { bookingId: number }) {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function OwnershipCard() {
+  const utils = trpc.useUtils();
+  const venues = trpc.venues.list.useQuery(undefined, { refetchOnWindowFocus: false });
+  const owners = trpc.admin.owners.useQuery(undefined, { refetchOnWindowFocus: false });
+
+  const [email, setEmail] = useState("");
+  const [venueId, setVenueId] = useState<number | null>(null);
+  const [open, setOpen] = useState(false);
+
+  const grant = trpc.admin.grantOwnership.useMutation({
+    onSuccess: () => {
+      toast.success("Venue ownership granted — the user now sees the Owner portal");
+      setEmail("");
+      setOpen(false);
+      utils.admin.owners.invalidate();
+      utils.owner.myVenues.invalidate();
+    },
+    onError: e => toast.error(e.message),
+  });
+
+  return (
+    <Card className="mt-6 border-border bg-card">
+      <CardContent className="p-6">
+        <div className="flex items-start justify-between flex-wrap gap-3">
+          <div>
+            <h3 className="font-display text-lg font-semibold flex items-center gap-2">
+              <KeyRound className="h-5 w-5 text-accent" /> Venue owners
+            </h3>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Assign a signed-in user as owner of a venue so they can manage its courts, rates, and bookings.
+              The owner must sign in to the app at least once before you can assign them.
+            </p>
+          </div>
+          <Dialog open={open} onOpenChange={setOpen}>
+            <DialogTrigger asChild>
+              <Button variant="outline" size="sm" className="press bg-transparent">
+                <UserPlus className="h-4 w-4 mr-1.5" /> Grant ownership
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-sm">
+              <DialogHeader>
+                <DialogTitle>Grant venue ownership</DialogTitle>
+                <DialogDescription>
+                  Give a signed-in user full management access to one venue.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4">
+                <div className="space-y-1.5">
+                  <Label>Owner email *</Label>
+                  <Input
+                    className="bg-background"
+                    type="email"
+                    placeholder="owner@example.com"
+                    value={email}
+                    onChange={e => setEmail(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Must match the account the owner signed in with.
+                  </p>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Venue *</Label>
+                  <Select
+                    value={venueId !== null ? String(venueId) : undefined}
+                    onValueChange={v => setVenueId(Number(v))}>
+                    <SelectTrigger className="bg-background">
+                      <SelectValue placeholder="Select venue" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {venues.data?.map(v => (
+                        <SelectItem key={v.id} value={String(v.id)}>
+                          {v.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" className="press bg-transparent" onClick={() => setOpen(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  className="press"
+                  disabled={grant.isPending || !email || venueId === null}
+                  onClick={() =>
+                    grant.mutate({ email: email.trim(), venueId: venueId! })
+                  }>
+                  {grant.isPending ? "Granting…" : "Grant ownership"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </div>
+
+        {owners.isLoading ? (
+          <div className="mt-4 flex justify-center">
+            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          </div>
+        ) : !owners.data?.length ? (
+          <p className="mt-4 text-sm text-muted-foreground">No venue owners assigned yet.</p>
+        ) : (
+          <div className="mt-4 overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Venue</TableHead>
+                  <TableHead>Owner</TableHead>
+                  <TableHead>Email</TableHead>
+                  <TableHead>Assigned</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {owners.data.map(row => {
+                  const venue = venues.data?.find(v => v.id === row.venueId);
+                  return (
+                    <TableRow key={row.id}>
+                      <TableCell>{venue?.name ?? `#${row.venueId}`}</TableCell>
+                      <TableCell>{row.ownerName ?? "—"}</TableCell>
+                      <TableCell className="font-mono text-xs">{row.ownerEmail ?? "—"}</TableCell>
+                      <TableCell>
+                        {row.createdAt ? new Date(row.createdAt).toLocaleDateString() : "—"}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

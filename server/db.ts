@@ -312,6 +312,23 @@ export async function grantVenueOwnership(userId: number, venueId: number) {
   await setRole(userId, "owner");
 }
 
+export async function listAllOwners() {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const rows = await db.select().from(venueOwners);
+  const enriched = await Promise.all(
+    rows.map(async r => {
+      const u = await db.select().from(users).where(eq(users.id, r.userId)).limit(1);
+      return {
+        ...r,
+        ownerName: u[0]?.name ?? null,
+        ownerEmail: u[0]?.email ?? null,
+      };
+    }),
+  );
+  return enriched;
+}
+
 /** Bookings the player made (matched by contact or playerName against given text). */
 export async function listPlayerBookings(identifier: string) {
   const db = await getDb();
