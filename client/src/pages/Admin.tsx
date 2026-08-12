@@ -28,8 +28,8 @@ import {
 } from "@/components/ui/table";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Badge } from "@/components/ui/badge";
-import { startLogin } from "@/const";
 import { formatHour, formatPHP, priceSlot } from "@shared/rates";
+import { Link } from "wouter";
 import { BadgeCheck, BadgeX, Clock, DoorOpen, Loader2, ReceiptText, Wrench, UserPlus, KeyRound, Plus, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -47,35 +47,20 @@ export default function Admin() {
     );
   }
 
-  if (!user) {
+  if (!user || (user.type !== "owner" && user.role !== "owner")) {
     return (
       <div className="container py-24 text-center fade-in">
         <Card className="max-w-sm mx-auto border-border">
           <CardContent className="p-8">
             <DoorOpen className="h-9 w-9 text-muted-foreground mx-auto" />
-            <h2 className="mt-4 font-display text-xl font-semibold">Staff sign-in required</h2>
+            <h2 className="mt-4 font-display text-xl font-semibold">Owner sign-in required</h2>
             <p className="mt-2 text-sm text-muted-foreground">
-              Sign in to access the booking management dashboard.
+              System administration is part of the owner portal. Sign in with your owner
+              credentials to continue.
             </p>
-            <Button className="mt-5 w-full press" onClick={() => startLogin()}>
-              Sign in
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  if (user.role !== "admin") {
-    return (
-      <div className="container py-24 text-center fade-in">
-        <Card className="max-w-sm mx-auto border-border">
-          <CardContent className="p-8">
-            <BadgeX className="h-9 w-9 text-destructive mx-auto" />
-            <h2 className="mt-4 font-display text-xl font-semibold">Admin access only</h2>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Your account does not have administrator privileges.
-            </p>
+            <Link href="/owner-login">
+              <Button className="mt-5 w-full press">Sign in</Button>
+            </Link>
           </CardContent>
         </Card>
       </div>

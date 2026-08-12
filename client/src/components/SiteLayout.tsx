@@ -17,7 +17,7 @@ export default function SiteLayout({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth();
   const [location] = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const isAdmin = user?.role === "admin";
+  const isAdmin = user?.role === "owner";
   const isOwner = user?.role === "owner";
 
   return (

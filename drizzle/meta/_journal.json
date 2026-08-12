@@ -29,6 +29,20 @@
       "when": 1786523780308,
       "tag": "0003_eager_demogoblin",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1786544889969,
+      "tag": "0004_wandering_white_tiger",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1786545444263,
+      "tag": "0005_real_revanche",
+      "breakpoints": true
     }
   ]
 }

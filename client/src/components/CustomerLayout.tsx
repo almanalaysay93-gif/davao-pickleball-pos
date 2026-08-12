@@ -1,8 +1,8 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { startLogin } from "@/const";
-import { CalendarDays, CircleDot, LayoutGrid, MapPin, Menu, UserRound, X } from "lucide-react";
+import { trpc } from "@/lib/trpc";
+import { CalendarDays, CircleDot, LayoutGrid, LogIn, MapPin, Menu, UserRound, X } from "lucide-react";
 import { ReactNode, useState } from "react";
 import { Link, useLocation } from "wouter";
 
@@ -18,9 +18,16 @@ const navLinks = [
  * admin navigation, links, or references.
  */
 export default function CustomerLayout({ children }: { children: ReactNode }) {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const [location] = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const logout = trpc.auth.logout.useMutation();
+
+  // The customer app only recognizes customer sessions. Owner sessions are
+  // invisible here — owners log in to the separate owner portal.
+  const isCustomer = user?.type === "customer";
+  const signedInCustomer = user && isCustomer;
+  const showMyBookings = true;
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -55,7 +62,7 @@ export default function CustomerLayout({ children }: { children: ReactNode }) {
                 {l.label}
               </Link>
             ))}
-            {user && (
+            {showMyBookings && (
               <Link
                 href="/my-bookings"
                 className={cn(
@@ -71,25 +78,26 @@ export default function CustomerLayout({ children }: { children: ReactNode }) {
           </nav>
 
           <div className="flex items-center gap-2">
-            {user ? (
+            {signedInCustomer ? (
               <div className="flex items-center gap-2">
                 <span className="hidden md:flex items-center gap-2 text-sm text-muted-foreground">
                   <UserRound className="h-4 w-4" />
-                  <span className="max-w-28 truncate">{user.name ?? user.email}</span>
+                  <span className="max-w-28 truncate">{user.name ?? user.identity}</span>
                 </span>
-                <Button variant="outline" size="sm" onClick={() => logout()}>
+                <Button variant="outline" size="sm" onClick={() => logout.mutate()}>
                   Sign Out
                 </Button>
               </div>
             ) : (
-              <Button
-                variant="outline"
-                size="sm"
-                className="hidden sm:inline-flex border-primary/40 text-primary hover:bg-primary/10"
-                onClick={() => startLogin()}>
-                <UserRound className="h-4 w-4 mr-1" />
-                Sign In
-              </Button>
+              <Link href="/customer-login">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="hidden sm:inline-flex border-primary/40 text-primary hover:bg-primary/10">
+                  <UserRound className="h-4 w-4 mr-1" />
+                  Sign In
+                </Button>
+              </Link>
             )}
             <Link href="/book">
               <Button className="hidden sm:inline-flex press">Book Now</Button>
@@ -122,23 +130,28 @@ export default function CustomerLayout({ children }: { children: ReactNode }) {
                 {l.label}
               </Link>
             ))}
-            {user ? (
+            <Link
+              href="/my-bookings"
+              onClick={() => setMobileOpen(false)}
+              className="px-3 py-2.5 rounded-md text-sm font-medium flex items-center gap-2 text-foreground/75 hover:bg-secondary">
+              <UserRound className="h-4 w-4" />
+              My Bookings
+            </Link>
+            {signedInCustomer ? (
               <>
-                <Link
-                  href="/my-bookings"
-                  onClick={() => setMobileOpen(false)}
-                  className="px-3 py-2.5 rounded-md text-sm font-medium flex items-center gap-2 text-foreground/75 hover:bg-secondary">
-                  <UserRound className="h-4 w-4" />
-                  My Bookings
-                </Link>
-                <Button variant="outline" size="sm" className="mt-2" onClick={() => logout()}>
+                <span className="px-3 text-xs text-muted-foreground truncate max-w-40">
+                  {user.name ?? user.identity}
+                </span>
+                <Button variant="outline" size="sm" className="mt-2" onClick={() => logout.mutate()}>
                   Sign Out
                 </Button>
               </>
             ) : (
-              <Button variant="outline" size="sm" className="mt-2" onClick={() => startLogin()}>
-                Sign In
-              </Button>
+              <Link href="/customer-login" onClick={() => setMobileOpen(false)}>
+                <Button variant="outline" size="sm" className="mt-2">
+                  <LogIn className="h-4 w-4 mr-1" /> Sign In
+                </Button>
+              </Link>
             )}
           </nav>
         )}
@@ -168,8 +181,9 @@ export default function CustomerLayout({ children }: { children: ReactNode }) {
               <li><Link href="/courts" className="hover:text-primary transition-colors">Court Directory</Link></li>
               <li><Link href="/schedule" className="hover:text-primary transition-colors">Schedule & Availability</Link></li>
               <li><Link href="/book" className="hover:text-primary transition-colors">Book a Court</Link></li>
-              {user && (
-                <li><Link href="/my-bookings" className="hover:text-primary transition-colors">My Bookings</Link></li>
+              <li><Link href="/my-bookings" className="hover:text-primary transition-colors">My Bookings</Link></li>
+              {!signedInCustomer && (
+                <li><Link href="/customer-login" className="hover:text-primary transition-colors">Create account</Link></li>
               )}
             </ul>
           </div>

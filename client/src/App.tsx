@@ -16,6 +16,8 @@ import Confirmation from "./pages/Confirmation";
 import Admin from "./pages/Admin";
 import MyBookings from "./pages/MyBookings";
 import Owner from "./pages/Owner";
+import CustomerLogin from "./pages/CustomerLogin";
+import OwnerLogin from "./pages/OwnerLogin";
 
 /** Customer-facing app shell: booking, courts, schedule, personal bookings. */
 function CustomerApp() {
@@ -29,6 +31,7 @@ function CustomerApp() {
         <Route path={"/checkout"} component={Checkout} />
         <Route path={"/confirmation/:reference"} component={Confirmation} />
         <Route path={"/my-bookings"} component={MyBookings} />
+        <Route path={"/customer-login"} component={CustomerLogin} />
         <Route path={"/owner"}>{() => <Redirect to={"/owner-app"} />}</Route>
         <Route path={"/admin"}>{() => <Redirect to={"/owner-app/admin"} />}</Route>
         <Route path={"/404"} component={NotFound} />
@@ -57,8 +60,9 @@ function Router() {
   return (
     <Switch>
       <Route path={"/owner-app/:rest*"}>{() => <OwnerApp />}</Route>
-      <Route path={"/owner-app"}>{() => <OwnerApp />}</Route>
-      <Route>{() => <CustomerApp />}</Route>
+        <Route path={"/owner-login"}>{() => <OwnerLogin />}</Route>
+        <Route path={"/owner-app"}>{() => <OwnerApp />}</Route>
+        <Route>{() => <CustomerApp />}</Route>
     </Switch>
   );
 }

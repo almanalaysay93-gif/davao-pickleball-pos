@@ -20,7 +20,6 @@ import {
 } from "@/components/ui/table";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Badge } from "@/components/ui/badge";
-import { startLogin } from "@/const";
 import { formatHour, formatPHP } from "@shared/rates";
 import {
   BadgeCheck,
@@ -38,12 +37,12 @@ import {
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { useLocation } from "wouter";
+import { Link, useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 
 export default function Owner() {
   const { user, loading: authLoading } = useAuth();
-  const [location, navigate] = useLocation();
+  const [location] = useLocation();
 
   if (authLoading) {
     return (
@@ -54,7 +53,8 @@ export default function Owner() {
     );
   }
 
-  if (!user) {
+  if (!user || user.type !== "owner") {
+    // Not logged in to the owner portal — show the dedicated owner sign-in card.
     return (
       <div className="container py-24 text-center fade-in">
         <Card className="max-w-sm mx-auto border-border">
@@ -62,45 +62,12 @@ export default function Owner() {
             <KeyRound className="h-9 w-9 text-muted-foreground mx-auto" />
             <h2 className="mt-4 font-display text-xl font-semibold">Owner sign-in required</h2>
             <p className="mt-2 text-sm text-muted-foreground">
-              Sign in to manage your venue's courts, rates, and reservations.
+              This portal is for venue business management. Sign in with your owner
+              credentials to manage courts, rates, and reservations.
             </p>
-            <Button className="mt-5 w-full press" onClick={() => startLogin()}>
-              Sign in
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  if (user.role === "admin") {
-    // Admins manage the system from the System Admin console; the owner
-    // dashboard pages are scoped to venue owners (and their queries forbid
-    // admin access), so route admins straight there.
-    navigate("/owner-app/admin", { replace: true });
-    return (
-      <div className="container py-24 flex flex-col items-center gap-3">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-        <p className="text-sm text-muted-foreground">Opening the admin console…</p>
-      </div>
-    );
-  }
-
-  if (user.role !== "owner") {
-    return (
-      <div className="container py-24 text-center fade-in">
-        <Card className="max-w-sm mx-auto border-border">
-          <CardContent className="p-8">
-            <BadgeX className="h-9 w-9 text-destructive mx-auto" />
-            <h2 className="mt-4 font-display text-xl font-semibold">Venue owner access only</h2>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Your account is not yet registered as a venue owner. The system administrator can
-              assign venue ownership to your registered email — just reach out with your venue
-              name and account email.
-            </p>
-            <Button variant="outline" className="mt-5 w-full press" onClick={() => startLogin()}>
-              Sign in
-            </Button>
+            <Link href="/owner-login">
+              <Button className="mt-5 w-full press">Sign in</Button>
+            </Link>
           </CardContent>
         </Card>
       </div>

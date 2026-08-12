@@ -80,6 +80,7 @@ export const bookings = mysqlTable("bookings", {
   endHour: varchar("endHour", { length: 5 }).notNull(),
   playerName: varchar("playerName", { length: 128 }).notNull(),
   contact: varchar("contact", { length: 64 }),
+  customerAccountId: int("customerAccountId"), // links online bookings to an optional customer account
   channel: mysqlEnum("channel", ["online", "walkin"]).default("online").notNull(),
   paymentStatus: mysqlEnum("paymentStatus", ["pending", "paid", "cancelled"]).default("pending").notNull(),
   paymentMethod: varchar("paymentMethod", { length: 32 }), // cash, gcash, card
@@ -123,3 +124,33 @@ export const announcements = mysqlTable("announcements", {
 
 export type Announcement = typeof announcements.$inferSelect;
 export type InsertAnnouncement = typeof announcements.$inferInsert;
+
+/**
+ * Customer accounts: optional email/password accounts for the customer app.
+ * Bookings work without an account (guest booking), but a logged-in account
+ * lets players view all their bookings.
+ */
+export const customerAccounts = mysqlTable("customerAccounts", {
+  id: int("id").autoincrement().primaryKey(),
+  email: varchar("email", { length: 320 }).notNull().unique(),
+  name: varchar("name", { length: 128 }),
+  passwordHash: varchar("passwordHash", { length: 255 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type CustomerAccount = typeof customerAccounts.$inferSelect;
+export type InsertCustomerAccount = typeof customerAccounts.$inferInsert;
+
+/**
+ * Owner credentials: fixed login for the Owner Portal, completely separate
+ * from the customer app. A seeded row carries the fixed username/password.
+ */
+export const ownerCredentials = mysqlTable("ownerCredentials", {
+  id: int("id").autoincrement().primaryKey(),
+  username: varchar("username", { length: 64 }).notNull().unique(),
+  passwordHash: varchar("passwordHash", { length: 255 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type OwnerCredential = typeof ownerCredentials.$inferSelect;
+export type InsertOwnerCredential = typeof ownerCredentials.$inferInsert;

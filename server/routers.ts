@@ -1,14 +1,29 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { COOKIE_NAME } from "@shared/const";
-import { getSessionCookieOptions } from "./_core/cookies";
+import mysql from "mysql2/promise";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router } from "./_core/trpc";
 import * as db from "./db";
 import { priceSlot, generateSlots } from "@shared/rates";
 
+import {
+  clearAuthCookies,
+  hashPassword,
+  setCustomerCookie,
+  setOwnerCookie,
+  verifyPassword,
+  type AppUser,
+} from "./auth";
+
+let pool: mysql.Pool | null = null;
+function getAuthPool(): mysql.Pool {
+  if (!pool && process.env.DATABASE_URL) pool = mysql.createPool(process.env.DATABASE_URL);
+  return pool!;
+}
+
 const adminProcedure = publicProcedure.use(({ ctx, next }) => {
-  if (!ctx.user || ctx.user.role !== "admin") {
+  // The owner portal's fixed password login covers system admin duties.
+  if (!ctx.user || ctx.user.role !== "owner") {
     throw new TRPCError({ code: "FORBIDDEN", message: "Admin access required" });
   }
   return next({ ctx });
@@ -21,14 +36,32 @@ const playerProcedure = publicProcedure.use(({ ctx, next }) => {
   return next({ ctx });
 });
 
+const customerAccountProcedure = publicProcedure.use(({ ctx, next }) => {
+  // Optional customer accounts in the customer app (email/password).
+  if (!ctx.user || ctx.user.type !== "customer") {
+    throw new TRPCError({ code: "UNAUTHORIZED", message: "Customer sign in required" });
+  }
+  return next({ ctx });
+});
+
 const ownerProcedure = publicProcedure.use(async ({ ctx, next }) => {
   if (!ctx.user || ctx.user.role !== "owner") {
     throw new TRPCError({ code: "FORBIDDEN", message: "Venue owner access required" });
   }
-  // Scope all owner actions to venues this user owns — verified per-call.
-  const ownedVenueIds = await db.listOwnerVenueIds(ctx.user.id);
-  return next({ ctx: { ...ctx, ownedVenueIds } });
+  // The fixed-password owner login manages all venues system-wide. Legacy
+  // OAuth-sourced owners stay scoped to their assigned venues.
+  const ownsAllVenues = ctx.user.type === "owner";
+  const ownedVenueIds: number[] = ownsAllVenues ? [] : await db.listOwnerVenueIds(ctx.user.id);
+  return next({ ctx: { ...ctx, ownsAllVenues, ownedVenueIds } });
 });
+
+function ownsVenue(ctx: { ownsAllVenues: boolean } & Record<string, unknown>, venueId: number): boolean {
+  return ctx.ownsAllVenues || (ctx.ownedVenueIds as number[]).includes(venueId);
+}
+
+function ownsVenuesList(ctx: { ownsAllVenues: boolean } & Record<string, unknown>): number[] | undefined {
+  return ctx.ownsAllVenues ? undefined : (ctx.ownedVenueIds as number[]);
+}
 
 const bookingInput = z.object({
   venueId: z.number().int().positive(),
@@ -40,6 +73,7 @@ const bookingInput = z.object({
   contact: z.string().max(64).optional(),
   channel: z.enum(["online", "walkin"]).default("online"),
   paymentMethod: z.string().max(32).optional(),
+  customerAccountId: z.number().int().positive().optional(),
 });
 
 type BookingInput = z.infer<typeof bookingInput>;
@@ -90,11 +124,12 @@ async function createBookingInput(input: BookingInput): Promise<string> {
     ...input,
     contact: input.contact ?? null,
     paymentMethod: input.paymentMethod ?? null,
+    customerAccountId: input.customerAccountId ?? null,
     reference,
     dayAmount: String(pricing.dayAmount),
     nightAmount: String(pricing.nightAmount),
     totalAmount: String(pricing.total),
-    paymentStatus: input.channel === "walkin" && input.paymentMethod ? "paid" : "pending",
+    paymentStatus: input.paymentMethod ? "paid" : "pending",
   });
 
   return reference;
@@ -104,11 +139,76 @@ export const appRouter = router({
   system: systemRouter,
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
+
     logout: publicProcedure.mutation(({ ctx }) => {
-      const cookieOptions = getSessionCookieOptions(ctx.req);
-      ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
+      clearAuthCookies(ctx.res);
       return { success: true } as const;
     }),
+
+    /** Owner portal: fixed-credential sign in. */
+    ownerLogin: publicProcedure
+      .input(z.object({ username: z.string().min(1), password: z.string().min(1) }))
+      .mutation(async ({ input, ctx }) => {
+        const [rows] = await getAuthPool().query(
+          "SELECT id, username, passwordHash FROM ownerCredentials WHERE username = ? LIMIT 1",
+          [input.username],
+        );
+        const row = (rows as any[])[0];
+        if (!row || !(await verifyPassword(input.password, row.passwordHash))) {
+          throw new TRPCError({ code: "UNAUTHORIZED", message: "Invalid owner credentials" });
+        }
+        setOwnerCookie(ctx.res, row.username, row.id);
+        return { success: true, username: row.username } as const;
+      }),
+
+    /** Owner sign out. */
+    ownerLogout: publicProcedure.mutation(({ ctx }) => {
+      clearAuthCookies(ctx.res);
+      return { success: true } as const;
+    }),
+
+    /** Customer app: optional account sign-up. */
+    signup: publicProcedure
+      .input(
+        z.object({
+          email: z.string().email().toLowerCase().max(320),
+          name: z.string().min(1).max(128).optional(),
+          password: z.string().min(8).max(128),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        const [existing] = await getAuthPool().query(
+          "SELECT id FROM customerAccounts WHERE email = ?",
+          [input.email],
+        );
+        if ((existing as any[]).length > 0) {
+          throw new TRPCError({ code: "CONFLICT", message: "An account with this email already exists" });
+        }
+        const hash = await hashPassword(input.password);
+        const [res] = await getAuthPool().query(
+          "INSERT INTO customerAccounts (email, name, passwordHash) VALUES (?, ?, ?)",
+          [input.email, input.name ?? null, hash],
+        );
+        const accountId = (res as any).insertId;
+        setCustomerCookie(ctx.res, accountId, input.email);
+        return { success: true, accountId } as const;
+      }),
+
+    /** Customer app: optional account sign-in. */
+    customerLogin: publicProcedure
+      .input(z.object({ email: z.string().email().toLowerCase(), password: z.string().min(1) }))
+      .mutation(async ({ input, ctx }) => {
+        const [rows] = await getAuthPool().query(
+          "SELECT id, email, name, passwordHash FROM customerAccounts WHERE email = ? LIMIT 1",
+          [input.email],
+        );
+        const row = (rows as any[])[0];
+        if (!row || !(await verifyPassword(input.password, row.passwordHash))) {
+          throw new TRPCError({ code: "UNAUTHORIZED", message: "Invalid email or password" });
+        }
+        setCustomerCookie(ctx.res, row.id, row.email);
+        return { success: true } as const;
+      }),
   }),
 
   venues: router({
@@ -175,9 +275,10 @@ export const appRouter = router({
       return priceSlot(input.startHour, input.endHour, tiers);
     }),
 
-    /** Create a booking (walk-in or online). */
-    create: publicProcedure.input(bookingInput).mutation(async ({ input }) => {
-      const reference = await createBookingInput(input);
+    /** Create a booking (walk-in or online). Guests can book; signed-in customers get their account linked. */
+    create: publicProcedure.input(bookingInput).mutation(async ({ input, ctx }) => {
+      const accountId = ctx.user?.type === "customer" ? ctx.user.id : undefined;
+      const reference = await createBookingInput({ ...input, customerAccountId: accountId });
       return { reference };
     }),
 
@@ -311,6 +412,17 @@ export const appRouter = router({
         return rows.map(r => ({ booking: r, venue: venueMap.get(r.venueId) ?? null }));
       }),
 
+    /** Customer account: all bookings made under the signed-in email. */
+    myAccountBookings: customerAccountProcedure.query(async ({ ctx }) => {
+      const email = ctx.user?.email;
+      if (!email) throw new TRPCError({ code: "UNAUTHORIZED", message: "Not signed in" });
+      const rows = await db.listPlayerBookings(email);
+      const venueIds = Array.from(new Set(rows.map(r => r.venueId)));
+      const venueRows = venueIds.length ? await db.listVenuesByIds(venueIds) : [];
+      const venueMap = new Map(venueRows.map((v: { id: number }) => [v.id, v]));
+      return rows.map(r => ({ booking: r, venue: venueMap.get(r.venueId) ?? null }));
+    }),
+
     /** Player: cancel my own booking (verified via booking id + identifier ownership). */
     cancelMine: playerProcedure
       .input(z.object({ id: z.number().int().positive(), identifier: z.string().min(3).max(128) }))
@@ -329,12 +441,16 @@ export const appRouter = router({
 
   /** Owner portal: manage the venues this owner owns. */
   owner: router({
-    myVenues: ownerProcedure.query(({ ctx }) => db.listOwnerVenues(ctx.user!.id)),
+    myVenues: ownerProcedure.query(async ({ ctx }) => {
+      // Fixed-password owner manages all venues.
+      if (ctx.ownsAllVenues) return db.listVenues();
+      return db.listOwnerVenues(ctx.user!.id);
+    }),
 
     courtsForVenue: ownerProcedure
       .input(z.object({ venueId: z.number().int().positive() }))
       .query(async ({ input, ctx }) => {
-        if (!ctx.ownedVenueIds.includes(input.venueId)) {
+        if (!ownsVenue(ctx, input.venueId)) {
           throw new TRPCError({ code: "FORBIDDEN", message: "You do not own this venue" });
         }
         return db.listCourtsByVenue(input.venueId);
@@ -343,7 +459,7 @@ export const appRouter = router({
     ratesForVenue: ownerProcedure
       .input(z.object({ venueId: z.number().int().positive() }))
       .query(async ({ input, ctx }) => {
-        if (!ctx.ownedVenueIds.includes(input.venueId)) {
+        if (!ownsVenue(ctx, input.venueId)) {
           throw new TRPCError({ code: "FORBIDDEN", message: "You do not own this venue" });
         }
         return db.listRateTiersByVenue(input.venueId);
@@ -360,7 +476,7 @@ export const appRouter = router({
         const tiers = await db.listRateTiers();
         const tier = tiers.find(t => t.id === input.tierId);
         if (!tier) throw new TRPCError({ code: "NOT_FOUND", message: "Rate tier not found" });
-        if (!ctx.ownedVenueIds.includes(tier.venueId)) {
+        if (!ownsVenue(ctx, tier.venueId)) {
           throw new TRPCError({ code: "FORBIDDEN", message: "You do not own this venue" });
         }
         await db.updateRateTier(input.tierId, { pricePerHour: input.pricePerHour });
@@ -377,7 +493,7 @@ export const appRouter = router({
       .mutation(async ({ input, ctx }) => {
         const court = await db.getCourtById(input.courtId);
         if (!court) throw new TRPCError({ code: "NOT_FOUND", message: "Court not found" });
-        if (!ctx.ownedVenueIds.includes(court.venueId)) {
+        if (!ownsVenue(ctx, court.venueId)) {
           throw new TRPCError({ code: "FORBIDDEN", message: "You do not own this venue" });
         }
         await db.setCourtStatus(input.courtId, input.status);
@@ -393,7 +509,7 @@ export const appRouter = router({
         }),
       )
       .mutation(async ({ input, ctx }) => {
-        if (!ctx.ownedVenueIds.includes(input.venueId)) {
+        if (!ownsVenue(ctx, input.venueId)) {
           throw new TRPCError({ code: "FORBIDDEN", message: "You do not own this venue" });
         }
         await db.addCourt(input.venueId, input.courtNumber);
@@ -406,7 +522,7 @@ export const appRouter = router({
       .mutation(async ({ input, ctx }) => {
         const court = await db.getCourtById(input.courtId);
         if (!court) throw new TRPCError({ code: "NOT_FOUND", message: "Court not found" });
-        if (!ctx.ownedVenueIds.includes(court.venueId)) {
+        if (!ownsVenue(ctx, court.venueId)) {
           throw new TRPCError({ code: "FORBIDDEN", message: "You do not own this venue" });
         }
         await db.removeCourt(input.courtId);
@@ -423,9 +539,10 @@ export const appRouter = router({
           .optional(),
       )
       .query(async ({ input, ctx }) => {
-        const rows = await db.listOwnerBookings(ctx.ownedVenueIds, input);
-        const venueIds = Array.from(new Set(rows.map(r => r.venueId)));
-        const venueRows = venueIds.length ? await db.listVenuesByIds(venueIds) : [];
+        const venueIds = ownsVenuesList(ctx) ?? (await db.listVenues()).map(v => v.id);
+        const rows = await db.listOwnerBookings(venueIds, input);
+        const resultVenueIds = Array.from(new Set(rows.map(r => r.venueId)));
+        const venueRows = resultVenueIds.length ? await db.listVenuesByIds(resultVenueIds) : [];
         const venueMap = new Map(venueRows.map((v: { id: number }) => [v.id, v]));
         return rows.map(r => ({ booking: r, venue: venueMap.get(r.venueId) ?? null }));
       }),
@@ -434,7 +551,7 @@ export const appRouter = router({
       .input(z.object({ id: z.number().int().positive(), paymentMethod: z.string().max(32).optional() }))
       .mutation(async ({ input, ctx }) => {
         const booking = await db.getBookingById(input.id);
-        if (!booking || !ctx.ownedVenueIds.includes(booking.venueId)) {
+        if (!booking || !ownsVenue(ctx, booking.venueId)) {
           throw new TRPCError({ code: "FORBIDDEN", message: "This booking is not at your venue" });
         }
         await db.updateBookingStatus(input.id, {
@@ -448,7 +565,7 @@ export const appRouter = router({
       .input(z.object({ id: z.number().int().positive() }))
       .mutation(async ({ input, ctx }) => {
         const booking = await db.getBookingById(input.id);
-        if (!booking || !ctx.ownedVenueIds.includes(booking.venueId)) {
+        if (!booking || !ownsVenue(ctx, booking.venueId)) {
           throw new TRPCError({ code: "FORBIDDEN", message: "This booking is not at your venue" });
         }
         await db.updateBookingStatus(input.id, { paymentStatus: "cancelled" });
@@ -459,7 +576,7 @@ export const appRouter = router({
     createBooking: ownerProcedure.input(bookingInput).mutation(async ({ input, ctx }) => {
       const venue = await db.getVenueById(input.venueId);
       if (!venue) throw new TRPCError({ code: "NOT_FOUND", message: "Venue not found" });
-      if (!ctx.ownedVenueIds.includes(venue.id)) {
+      if (!ownsVenue(ctx, venue.id)) {
         throw new TRPCError({ code: "FORBIDDEN", message: "You do not own this venue" });
       }
       // Reuse the public create flow by calling its inner mutation logic:
@@ -477,9 +594,9 @@ export const appRouter = router({
       .query(async ({ input, ctx }) => {
         const ids = input?.venueId
           ? [input.venueId]
-          : ctx.ownedVenueIds;
+          : ownsVenuesList(ctx) ?? [];
         const rows = await db.listVenueAnnouncements(ids);
-        return rows.filter(a => ctx.ownedVenueIds.includes(a.venueId));
+        return rows.filter(a => ownsVenue(ctx, a.venueId));
       }),
 
     createAnnouncement: ownerProcedure
@@ -492,7 +609,7 @@ export const appRouter = router({
         }),
       )
       .mutation(async ({ input, ctx }) => {
-        if (!ctx.ownedVenueIds.includes(input.venueId)) {
+        if (!ownsVenue(ctx, input.venueId)) {
           throw new TRPCError({ code: "FORBIDDEN", message: "You do not own this venue" });
         }
         await db.createAnnouncement({
@@ -517,7 +634,7 @@ export const appRouter = router({
       )
       .mutation(async ({ input, ctx }) => {
         const { id, ...patch } = input;
-        const all = await db.listVenueAnnouncements(ctx.ownedVenueIds);
+        const all = await db.listVenueAnnouncements(ownsVenuesList(ctx) ?? []);
         const row = all.find(a => a.id === id);
         if (!row) {
           throw new TRPCError({ code: "FORBIDDEN", message: "This announcement is not at your venue" });
@@ -534,7 +651,7 @@ export const appRouter = router({
     deleteAnnouncement: ownerProcedure
       .input(z.object({ id: z.number().int().positive() }))
       .mutation(async ({ input, ctx }) => {
-        const all = await db.listVenueAnnouncements(ctx.ownedVenueIds);
+        const all = await db.listVenueAnnouncements(ownsVenuesList(ctx) ?? []);
         const row = all.find(a => a.id === input.id);
         if (!row) {
           throw new TRPCError({ code: "FORBIDDEN", message: "This announcement is not at your venue" });

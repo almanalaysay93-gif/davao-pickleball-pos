@@ -101,14 +101,11 @@ function baseCtx(user: AuthenticatedUser | null): TrpcContext {
 function adminCtx(): TrpcContext {
   return baseCtx({
     id: 1,
-    openId: "admin-user",
-    email: "admin@example.com",
-    name: "Admin",
-    loginMethod: "manus",
-    role: "admin",
-    createdAt: new Date(),
-    updatedAt: new Date(),
-    lastSignedIn: new Date(),
+    type: "owner",
+    identity: "owner",
+    name: "owner",
+    email: null,
+    role: "owner",
   });
 }
 
@@ -119,30 +116,41 @@ function guestCtx(): TrpcContext {
 function playerCtx(): TrpcContext {
   return baseCtx({
     id: 99,
-    openId: "player-user",
-    email: "player@example.com",
+    type: "customer",
+    identity: "player@example.com",
     name: "Player",
-    loginMethod: "manus",
-    role: "player",
-    createdAt: new Date(),
-    updatedAt: new Date(),
-    lastSignedIn: new Date(),
+    email: "player@example.com",
+    role: "customer",
   });
 }
 
 let ownerCounter = 1;
-function ownerCtx(email?: string): TrpcContext {
+// Legacy-scope owner caller: role 'owner' passes RBAC; type 'customer' keeps
+// ownsAllVenues false so the caller stays scoped to its venueOwners rows.
+function legacyOwnerCtx(
+  userId: number,
+  opts?: { email?: string | null; name?: string },
+): TrpcContext {
+  return baseCtx({
+    id: userId,
+    type: "customer",
+    identity: opts?.email ?? `legacy-owner-${userId}@example.com`,
+    name: opts?.name ?? `Legacy Owner ${userId}`,
+    email: opts?.email ?? null,
+    role: "owner",
+  });
+}
+
+function ownerCtx(): TrpcContext {
+  // Legacy-scope owner: stays scoped to assigned venues (type !== 'owner').
   const id = 100 + ownerCounter++;
   return baseCtx({
     id,
-    openId: `owner-${id}`,
-    email: email ?? `owner-${id}@example.com`,
+    type: "customer",
+    identity: `owner-${id}@example.com`,
     name: `Owner ${id}`,
-    loginMethod: "manus",
+    email: `owner-${id}@example.com`,
     role: "owner",
-    createdAt: new Date(),
-    updatedAt: new Date(),
-    lastSignedIn: new Date(),
   });
 }
 
@@ -338,14 +346,11 @@ describe("admin authorization", () => {
     const userCaller = appRouter.createCaller(
       baseCtx({
         id: 2,
-        openId: "regular-user",
+        type: "customer",
+        identity: "regular@example.com",
         name: "Regular",
-        email: null,
-        loginMethod: "manus",
-        role: "user",
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        lastSignedIn: new Date(),
+        email: "regular@example.com",
+        role: "customer",
       }),
     );
     await expect(userCaller.bookings.cancel(adminInput)).rejects.toThrow(/admin access/i);
@@ -362,14 +367,11 @@ describe("dual-role: player & owner routers", () => {
   it("denies a signed-in player from owner-only routes", async () => {
     const playerCtx: TrpcContext = baseCtx({
       id: 9999,
-      openId: "signed-in-player",
+      type: "customer",
+      identity: "player-signed-in@example.com",
       email: "player-signed-in@example.com",
       name: "Player",
-      loginMethod: "manus",
-      role: "player",
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      lastSignedIn: new Date(),
+      role: "customer",
     });
     const caller = appRouter.createCaller(playerCtx);
     await expect(caller.owner.myVenues()).rejects.toThrow();
@@ -403,8 +405,17 @@ describe("dual-role: player & owner routers", () => {
       const u2 = await getUserByEmail(email2);
 
       // Owner 2 books a court at venue 2 (their own venue).
+      // Legacy-scope owner caller: role 'owner' for RBAC, type 'customer' so
+      // the ownerProcedure stays venue-scoped (ownsAllVenues is false).
       const caller2 = appRouter.createCaller(
-        baseCtx({ ...u2!, openId: `o-${u2!.id}`, lastSignedIn: new Date() }),
+        baseCtx({
+          id: u2!.id,
+          type: "customer",
+          identity: u2!.email ?? "",
+          name: u2!.name ?? "Owner",
+          email: u2!.email,
+          role: "owner",
+        }),
       );
       const courts = await caller2.owner.courtsForVenue({ venueId: v2.id });
       const court = courts.find(c => c.status === "available")!;
@@ -420,7 +431,14 @@ describe("dual-role: player & owner routers", () => {
 
       // Owner 1's bookings view must NOT include the booking at venue 2.
       const caller1 = appRouter.createCaller(
-        baseCtx({ ...u1!, openId: `o-${u1!.id}`, lastSignedIn: new Date() }),
+        baseCtx({
+          id: u1!.id,
+          type: "customer",
+          identity: u1!.email ?? "",
+          name: u1!.name ?? "Owner",
+          email: u1!.email,
+          role: "owner",
+        }),
       );
       const b1 = await caller1.owner.bookings({});
       // Owner 1 owns only venue 1, so bookings made at venue 2 must be invisible.
@@ -442,9 +460,7 @@ describe("dual-role: player & owner routers", () => {
 );
 
   it("denies owner-scoped actions when no venues are owned", async () => {
-    const caller = appRouter.createCaller(
-      ownerCtx("owner-no-venues@example.com"),
-    );
+    const caller = appRouter.createCaller(ownerCtx());
     const venues = await caller.owner.myVenues();
     expect(venues).toEqual([]);
     await expect(caller.owner.courtsForVenue({ venueId: 1 })).rejects.toThrow(
@@ -474,11 +490,7 @@ describe("dual-role: player & owner routers", () => {
       await adminCaller.admin.grantOwnership({ venueId: arena.id, email });
       const seededAgain = await getUserByEmail(email);
       const ownerCaller = appRouter.createCaller(
-        baseCtx({
-          ...seededAgain!,
-          openId: `owner-${seededAgain!.id}`,
-          lastSignedIn: new Date(),
-        }),
+        legacyOwnerCtx(seededAgain!.id, { email: seededAgain!.email, name: seededAgain!.name ?? undefined }),
       );
       const owned = await ownerCaller.owner.myVenues();
       expect(owned.map(v => v.id)).toContain(arena.id);
@@ -515,21 +527,18 @@ describe("announcements & owner booking", () => {
       await adminCaller.admin.grantOwnership({ venueId: arena.id, email });
       const seededAgain = await getUserByEmail(email);
       const ownerCaller = appRouter.createCaller(
-        baseCtx({ ...seededAgain!, openId: `owner-${seededAgain!.id}`, lastSignedIn: new Date() }),
+        legacyOwnerCtx(seededAgain!.id, { email: seededAgain!.email }),
       );
 
       // Player cannot manage announcements
       const playerCaller = appRouter.createCaller(
         baseCtx({
           id: 9001,
-          openId: "player-ann",
+          type: "customer",
+          identity: "pl-ann@example.com",
           email: "pl-ann@example.com",
           name: "Player",
-          loginMethod: "manus",
-          role: "player",
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          lastSignedIn: new Date(),
+          role: "customer",
         }),
       );
       await expect(
@@ -592,7 +601,7 @@ describe("announcements & owner booking", () => {
       await adminCaller.admin.grantOwnership({ venueId: arena.id, email });
       const seededAgain = await getUserByEmail(email);
       const ownerCaller = appRouter.createCaller(
-        baseCtx({ ...seededAgain!, openId: `owner-${seededAgain!.id}`, lastSignedIn: new Date() }),
+        legacyOwnerCtx(seededAgain!.id, { email: seededAgain!.email }),
       );
 
       // Announcement that expired yesterday
@@ -656,7 +665,7 @@ describe("announcements & owner booking", () => {
       await adminCaller.admin.grantOwnership({ venueId: arena.id, email });
       const seededAgain = await getUserByEmail(email);
       const ownerCaller = appRouter.createCaller(
-        baseCtx({ ...seededAgain!, openId: `owner-${seededAgain!.id}`, lastSignedIn: new Date() }),
+        legacyOwnerCtx(seededAgain!.id, { email: seededAgain!.email }),
       );
 
       // Booking at a venue the owner does NOT own must fail
@@ -706,14 +715,11 @@ describe("announcements & owner booking", () => {
       const playerCaller = appRouter.createCaller(
         baseCtx({
           id: 9002,
-          openId: "player-ownbook",
+          type: "customer",
+          identity: "pl-ownbook@example.com",
           email: "pl-ownbook@example.com",
           name: "Player",
-          loginMethod: "manus",
-          role: "player",
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          lastSignedIn: new Date(),
+          role: "customer",
         }),
       );
       await expect(
@@ -794,16 +800,11 @@ describe(
       const venueRows = await listVenues();
       const arena = venueRows.find(v => v.name === "Arena Athletics")!;
       const other = venueRows.find(v => v.id !== arena.id)!;
-      await adminCaller.admin.grantOwnership({ venueId: arena.id, email });
+            await adminCaller.admin.grantOwnership({ venueId: arena.id, email });
       const seededAgain = await getUserByEmail(email);
       const ownerCaller = appRouter.createCaller(
-        baseCtx({
-          ...seededAgain!,
-          openId: `owner-${seededAgain!.id}`,
-          lastSignedIn: new Date(),
-        }),
+        legacyOwnerCtx(seededAgain!.id, { email: seededAgain!.email }),
       );
-
       // Add court to owned venue.
       await ownerCaller.owner.createCourt({ venueId: arena.id, courtNumber: "Court 99" });
       const courts = await ownerCaller.owner.courtsForVenue({ venueId: arena.id });
@@ -849,16 +850,11 @@ describe(
       const adminCaller = appRouter.createCaller(adminCtx());
       const venueRows = await listVenues();
       const arena = venueRows.find(v => v.name === "Arena Athletics")!;
-      await adminCaller.admin.grantOwnership({ venueId: arena.id, email });
+            await adminCaller.admin.grantOwnership({ venueId: arena.id, email });
       const seededAgain = await getUserByEmail(email);
       const ownerCaller = appRouter.createCaller(
-        baseCtx({
-          ...seededAgain!,
-          openId: `owner-${seededAgain!.id}`,
-          lastSignedIn: new Date(),
-        }),
+        legacyOwnerCtx(seededAgain!.id, { email: seededAgain!.email }),
       );
-
       // Add a court and book it for tomorrow.
       await ownerCaller.owner.createCourt({ venueId: arena.id, courtNumber: "Court 99" });
       const courts = await ownerCaller.owner.courtsForVenue({ venueId: arena.id });

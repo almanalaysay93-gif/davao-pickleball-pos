@@ -65,7 +65,7 @@ export default function Checkout() {
       playerName: draft.playerName!,
       contact: draft.contact ?? undefined,
       channel,
-      paymentMethod: channel === "walkin" ? paymentMethod : undefined,
+      paymentMethod,
     });
   };
 
