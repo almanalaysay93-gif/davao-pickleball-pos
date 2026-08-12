@@ -168,6 +168,7 @@ describe("bookings.quote", () => {
 describe("bookings.create + conflict detection", () => {
   it("creates a booking and rejects a conflicting one", async () => {
     vi.useFakeTimers({ now: new Date("2026-09-01T12:00:00Z") });
+    const day = "2026-09-09"; // isolated date (admin tests use 2026-09-05)
     try {
       const caller = appRouter.createCaller(guestCtx());
       const venues = await caller.venues.list();
@@ -178,7 +179,7 @@ describe("bookings.create + conflict detection", () => {
       const ref = await caller.bookings.create({
         venueId: arena.id,
         courtId: court.id,
-        playerDate: "2026-09-05",
+        playerDate: day,
         startHour: "10:00",
         endHour: "12:00",
         playerName: "Test Player",
@@ -191,7 +192,7 @@ describe("bookings.create + conflict detection", () => {
         caller.bookings.create({
           venueId: arena.id,
           courtId: court.id,
-          playerDate: "2026-09-05",
+          playerDate: day,
           startHour: "11:00",
           endHour: "13:00",
           playerName: "Other Player",
@@ -204,7 +205,7 @@ describe("bookings.create + conflict detection", () => {
       const ref2 = await caller.bookings.create({
         venueId: arena.id,
         courtId: other.id,
-        playerDate: "2026-09-05",
+        playerDate: day,
         startHour: "10:00",
         endHour: "12:00",
         playerName: "Other Player",

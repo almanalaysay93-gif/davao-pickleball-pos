@@ -30,16 +30,25 @@ export default function Schedule() {
   const [venueId, setVenueId] = useState<number | null>(initialVenueId ?? null);
 
   // Default to the first venue once the list has loaded.
-  if (!venueId && venues?.[0] && !initialVenueId) {
-    setVenueId(venues[0].id);
-  }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const shouldDefault = !venueId && !initialVenueId;
+
   const [playerDate, setPlayerDate] = useState(todayStr());
   const [timeFilter, setTimeFilter] = useState<TimeFilter>("all");
 
   const availability = trpc.availability.forVenueDate.useQuery(
     { venueId: venueId ?? 1, playerDate },
-    { enabled: venueId !== null, refetchOnWindowFocus: false },
+    {
+      enabled: venueId !== null,
+      refetchOnWindowFocus: false,
+      refetchInterval: 15000, // refresh grid every 15 seconds for near-real-time status
+    },
   );
+
+  // Apply the venue default once when the venue list arrives.
+  if (shouldDefault && venues?.[0]) {
+    setVenueId(venues[0].id);
+  }
 
   const filtered = useMemo(() => {
     const data = availability.data;

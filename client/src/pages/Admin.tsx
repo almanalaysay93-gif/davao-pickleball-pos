@@ -307,18 +307,14 @@ function PayDialog({ bookingId, onDone }: { bookingId: number; onDone: () => voi
 function ModifyDialog({ bookingId }: { bookingId: number }) {
   const utils = trpc.useUtils();
   const [open, setOpen] = useState(false);
-  const { data: booking } = trpc.bookings.get.useQuery(
-    { reference: "" },
-    { enabled: false },
-  );
-  void booking;
 
   const [playerName, setPlayerName] = useState("");
   const [contact, setContact] = useState("");
   const [newStart, setNewStart] = useState("");
   const [newEnd, setNewEnd] = useState("");
 
-  const detail = trpc.bookings.list.useQuery(undefined, { enabled: false });
+  // Load the full reservation list while the dialog is open so we can prefill.
+  const detail = trpc.bookings.list.useQuery(undefined, { enabled: open });
   const rows = detail.data ?? [];
   const target = rows.find(r => r.id === bookingId);
 
@@ -421,11 +417,8 @@ function WalkInDialog() {
       utils.bookings.list.invalidate();
       utils.availability.forVenueDate.invalidate();
       setOpen(false);
-      // Show the confirmation view immediately via navigation
-      window.location.hash = "";
-      toast(`Booking confirmed: ${res.reference}`, {
-        action: { label: "View receipt", onClick: () => (window.location.href = `/confirmation/${res.reference}`) },
-      });
+      // Show the receipt screen immediately — same flow as online checkout.
+      window.location.href = `/confirmation/${res.reference}`;
     },
     onError: e => toast.error(e.message),
   });

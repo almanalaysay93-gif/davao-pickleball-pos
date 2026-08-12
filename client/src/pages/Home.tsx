@@ -42,7 +42,7 @@ const highlights = [
 ];
 
 export default function Home() {
-  const { data: venues, isLoading } = trpc.venues.list.useQuery(undefined, {
+  const { data: venues, isLoading, error: venuesError } = trpc.venues.list.useQuery(undefined, {
     refetchOnWindowFocus: false,
   });
   const { data: rates } = trpc.rates.all.useQuery(undefined, {
@@ -184,7 +184,9 @@ export default function Home() {
             </Link>
           </div>
 
-          {isLoading ? (
+          {venuesError ? (
+            <p className="mt-8 text-sm text-destructive">Unable to load venues. Please try again shortly.</p>
+          ) : isLoading ? (
             <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {Array.from({ length: 6 }).map((_, i) => (
                 <div key={i} className="h-40 rounded-lg bg-muted animate-pulse" />
