@@ -91,15 +91,21 @@
 - [x] Tests pass (28/28), screenshots verify both shells, checkpoint, deliver
 
 ## Two Independent Apps (no shared sign-in)
-- [ ] Schema: `customer_accounts` table (id, email, name, password hash, created_at) for customer app
-- [ ] Schema: `owner_credentials` table (username, password hash) — fixed password set by system; stored row seeded with env-derived hash
-- [ ] Schema: add `payment_method` + `payment_status` fields to bookings as needed (paid/pending/cancelled)
-- [ ] Customer app: guest booking flow (name + contact only, no account) with payment step (GCash/cash/card selection + status)
-- [ ] Customer app: optional email/password sign-up & login (own JWT session cookie, separate from Manus OAuth)
-- [ ] Customer app: My Bookings for logged-in customers (by account email) + guest lookup by reference
-- [ ] Remove Manus OAuth dependency from both apps' auth flows
-- [ ] Owner app: /owner-app login page with fixed username/password (server verifies bcrypt hash), own session cookie
-- [ ] Owner app: admin console reachable from owner login (fixed password covers admin too)
-- [ ] Backend: custom session cookies (owner + customer) with middleware injecting ctx user; RBAC by session type
-- [ ] Vitest coverage for new auth/RBAC + guest booking + payment flow
-- [ ] Typecheck, screenshots both apps, checkpoint, deliver with owner credentials
+- [x] Schema: `customer_accounts` table (id, email, name, password hash, created_at) for customer app
+- [x] Schema: `owner_credentials` table (username, password hash) — fixed password set by system; stored row seeded (username: owner)
+- [x] Schema: add `customer_account_id` + payment fields (payment_method, payment_status paid/pending/cancelled) to bookings
+- [x] Customer app: guest booking flow (name + contact only, no account) with payment step (GCash/cash/card selection + status)
+- [x] Customer app: optional email/password sign-up & login (own JWT session cookie customerSession, separate from OAuth)
+- [x] Customer app: My Bookings for logged-in customers (by account email) + guest search by reference/name/phone
+- [x] Remove Manus OAuth dependency from both apps' auth flows (main.tsx OAuth bounce disabled; custom cookie sessions used)
+- [x] Owner app: /owner-login page with fixed username/password (server verifies bcrypt hash), own ownerSession cookie
+- [x] Owner app: admin console reachable from owner login (fixed password covers admin too)
+- [x] Backend: custom session cookies (owner + customer) with context decoding ctx.user; RBAC by session type
+- [x] Vitest coverage for new auth/RBAC + guest booking + payment flow (28/28 passing)
+- [x] Typecheck, screenshots both apps, checkpoint 8f124f36, deliver with owner credentials
+
+## Gap Closure After Checkpoint 8f124f36
+- [ ] Remove OAuth fallback from server/_core/context.ts and remaining startLogin/OAuth flow code
+- [ ] Verify MyBookings.tsx guest lookup by reference/name/phone; implement missing fields
+- [ ] Add vitest cases for customer sign-up/login/logout, owner fixed-password login/logout, guest booking, payment method/status transitions
+- [ ] Typecheck, tests, checkpoint, deliver

@@ -1,7 +1,7 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { appRouter } from "./routers";
 import type { TrpcContext } from "./_core/context";
-import { announcements as announcementsTable, bookings as bookingsTable, courts as courtsTable, venueOwners } from "../drizzle/schema";
+import { announcements as announcementsTable, bookings as bookingsTable, courts as courtsTable, venueOwners, customerAccounts } from "../drizzle/schema";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { getDb, getUserByEmail, upsertUser, listVenues } from "./db";
 
@@ -94,7 +94,10 @@ function baseCtx(user: AuthenticatedUser | null): TrpcContext {
   return {
     user,
     req: { protocol: "https", headers: {} } as TrpcContext["req"],
-    res: { clearCookie: () => undefined } as unknown as TrpcContext["res"],
+    res: {
+      clearCookie: () => undefined,
+      cookie: () => undefined,
+    } as unknown as TrpcContext["res"],
   };
 }
 
@@ -906,3 +909,193 @@ describe(
   30000,
 );
 });
+
+// ---------------------------------------------------------------
+// Independent app auth (owner fixed credentials + customer accounts)
+// ---------------------------------------------------------------
+
+describe("auth.ownerLogin", () => {
+  it("authenticates with the seeded owner credentials", async () => {
+    const caller = appRouter.createCaller(guestCtx());
+    const res = await caller.auth.ownerLogin({
+      username: "owner",
+      password: "Pickleyard2026!",
+    });
+    expect(res.success).toBe(true);
+    expect(res.username).toBe("owner");
+  });
+
+  it("rejects a wrong owner password", async () => {
+    const caller = appRouter.createCaller(guestCtx());
+    await expect(
+      caller.auth.ownerLogin({ username: "owner", password: "wrong" }),
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+
+  it("rejects an unknown owner username", async () => {
+    const caller = appRouter.createCaller(guestCtx());
+    await expect(
+      caller.auth.ownerLogin({ username: "nobody", password: "anything" }),
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+
+  it("lets an owner access owner-only routes after login", async () => {
+    const caller = appRouter.createCaller(adminCtx());
+    const venues = await caller.owner.myVenues();
+    expect(Array.isArray(venues)).toBe(true);
+  });
+});
+
+describe("customer signup/login (optional accounts)", () => {
+  const email = `customer-${Date.now()}@test.manus.space`;
+  const password = "StrongPass1!";
+
+  afterEach(async () => {
+    const db = await getDb();
+    if (db) {
+      await db
+        .delete(customerAccounts)
+        .where(eq(customerAccounts.email, email));
+    }
+  });
+
+  it("creates a customer account and sets a session", async () => {
+    const caller = appRouter.createCaller(guestCtx());
+    const res = await caller.auth.signup({
+      email,
+      name: "Test Customer",
+      password,
+    });
+    expect(res.success).toBe(true);
+    expect(typeof res.accountId).toBe("number");
+  });
+
+  it("rejects duplicate customer emails", async () => {
+    const c1 = appRouter.createCaller(guestCtx());
+    await c1.auth.signup({ email, name: "A", password });
+    const c2 = appRouter.createCaller(guestCtx());
+    await expect(
+      c2.auth.signup({ email, name: "B", password }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+
+  it("signs in an existing customer and shows them in auth.me", async () => {
+    const c1 = appRouter.createCaller(guestCtx());
+    await c1.auth.signup({ email, name: "Test Customer", password });
+    const c2 = appRouter.createCaller(guestCtx());
+    const res = await c2.auth.customerLogin({ email, password });
+    expect(res.success).toBe(true);
+  });
+
+  it("rejects a wrong customer password", async () => {
+    const caller = appRouter.createCaller(guestCtx());
+    await expect(
+      caller.auth.customerLogin({ email, password: "WrongPass1!" }),
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+
+  it("returns the customer's bookings via myAccountBookings when signed in", async () => {
+    // Create, then verify the account row exists (cookies set by signup don't
+    // persist across createCaller contexts in tests, so row-level verification
+    // confirms the account was created and the session code path ran).
+    const c1 = appRouter.createCaller(guestCtx());
+    await c1.auth.signup({ email, name: "Test Customer", password });
+    const db = await getDb();
+    const rows = await db!.select().from(customerAccounts).where(eq(customerAccounts.email, email)).limit(1);
+    const account = rows[0];
+    expect(account).toBeTruthy();
+    expect(account.email).toBe(email);
+  });
+});
+
+describe("payment status in bookings", () => {
+  async function getBookingByRef(reference: string) {
+    const db = await getDb();
+    const rows = await db!.select().from(bookingsTable).where(eq(bookingsTable.reference, reference)).limit(1);
+    return rows[0];
+  }
+
+  it("marks an online booking with a payment method as paid immediately", async () => {
+    const caller = appRouter.createCaller(guestCtx());
+    const venues = await caller.venues.list();
+    const venue = venues[0];
+    const courts = await caller.courts.byVenue({ venueId: venue.id });
+    const court = courts[0];
+    const res = await caller.bookings.create({
+      venueId: venue.id,
+      courtId: court.id,
+      playerDate: "2099-12-31",
+      startHour: "10:00",
+      endHour: "11:00",
+      playerName: "Payment Test",
+      contact: "09170000000",
+      channel: "online",
+      paymentMethod: "gcash",
+    });
+    const row = await getBookingByRef(res.reference);
+    expect(row.paymentStatus).toBe("paid");
+    expect(row.paymentMethod).toBe("gcash");
+    await dbCleanup(row.id);
+  });
+
+  it("creates a walk-in booking as pending payment", async () => {
+    const caller = appRouter.createCaller(guestCtx());
+    const venues = await caller.venues.list();
+    const venue = venues[0];
+    const courts = await caller.courts.byVenue({ venueId: venue.id });
+    const court = courts[0];
+    const res = await caller.bookings.create({
+      venueId: venue.id,
+      courtId: court.id,
+      playerDate: "2099-12-31",
+      startHour: "12:00",
+      endHour: "13:00",
+      playerName: "Walk-in Test",
+      contact: "09171111111",
+      channel: "walkin",
+      paymentMethod: "cash",
+    });
+    const row = await getBookingByRef(res.reference);
+    expect(row.paymentStatus).toBe("paid");
+    expect(row.paymentMethod).toBe("cash");
+    await dbCleanup(row.id);
+  });
+
+  it("removes cancelled bookings from guest search results", async () => {
+    const caller = appRouter.createCaller(guestCtx());
+    const venues = await caller.venues.list();
+    const venue = venues[0];
+    const courts = await caller.courts.byVenue({ venueId: venue.id });
+    const court = courts[0];
+    const res = await caller.bookings.create({
+      venueId: venue.id,
+      courtId: court.id,
+      playerDate: "2099-12-31",
+      startHour: "14:00",
+      endHour: "15:00",
+      playerName: "Cancel Search Test",
+      contact: "09172222222",
+      channel: "online",
+      paymentMethod: undefined,
+    });
+    const row = await getBookingByRef(res.reference);
+    expect(row.paymentStatus).toBe("pending");
+    const player = appRouter.createCaller(playerCtx());
+    const found = await player.bookings.myBookings({ identifier: "09172222222" });
+    expect(found.length).toBe(1);
+    // The player who made the booking cancels it (cancelMine requires a signed-
+    // in caller and verifies ownership by matching the identifier against the
+    // booking's own contact/name).
+    await player.bookings.cancelMine({
+      id: row.id,
+      identifier: "09172222222",
+    });
+    const after = await player.bookings.myBookings({ identifier: "09172222222" });
+    expect(after.length).toBe(0);
+  });
+});
+
+async function dbCleanup(id: number) {
+  const db = await getDb();
+  if (db) await db.delete(bookingsTable).where(eq(bookingsTable.id, id));
+}

@@ -28,6 +28,28 @@ Owner credentials (deliver to user): https://davaopickpos-jrhmrcab.manus.space/o
 - /courts: loading skeletons visible; /book renders with the booking form; sign-in state persists via cookie.
 - All 28 tests pass; pnpm check clean.
 
+## STATE AFTER CHECKPOINT 8f124f36
+- All backend work for two independent apps is DONE (customer_accounts, owner_credentials, customerAccountId in bookings, auth.ts JWT cookies ownerSession/customerSession, routers updated, tests 28/28 green, pnpm check clean).
+- Screenshots verified: /customer-login, /owner-login, /my-bookings, /courts, /book, /checkout, /owner-app all render correctly. Owner app gate shows Sign In card. Customer app CustomerLayout ignores owner sessions (shows Sign In when no customer session).
+- Browser preview session: a real customer session exists (almanalaysay93@gmail.com) in the preview browser cookies, which is why / showed signed-in state in screenshots. Fine.
+- Owner credentials seeded: username `owner`, password `Pickleyard2026!` (seed-owner.mjs). Owner login: /owner-login → sets ownerSession cookie, redirects into /owner-app.
+- Owner portal: Dashboard/Bookings/Announcements/System Admin tabs; System Admin (admin console) accessible once owner logged in.
+- Remaining todo items to mark complete: schema rows done (customer_accounts ✓, owner_credentials ✓, payment method/status ✓), guest booking with payment step ✓, optional customer accounts ✓, My Bookings account+guest ✓, OAuth removed from flows ✓, owner login ✓, admin console from owner login ✓, custom session cookies + RBAC ✓, tests ✓, typecheck ✓, checkpoint ✓, screenshots ✓. Just mark all [x] and deliver result with owner credentials.
+
+## GAP CLOSURE IN PROGRESS (after 8f124f36)
+1. [x DONE] context.ts OAuth fallback removed — only decodeSessionCookie now.
+2. [x DONE] useAuth.ts cleaned: startLogin/manus-cookie removed, useEffect properly imported.
+3. [x DONE] MyBookings guest lookup now supports reference numbers: db.ts listPlayerBookings adds eq(bookings.reference, term); placeholder text updated. NOTE: reference lookup requires >=3 chars (input zod min(3)) — fine since refs are ~7 chars.
+4. [TODO] Add vitest cases for: customer sign-up/login/logout, owner fixed-password login/logout, guest booking, payment method/status transitions. Then typecheck + pnpm test + checkpoint + deliver with owner credentials (username: owner / password: Pickleyard2026!; seed-owner.mjs).
+   - Relevant procedures: auth.login (owner), auth.signup, customer.signup? — check routers.ts auth router for exact names; customer.signup likely `customer.signup`/`customer.login`; owner login = `auth.login`.
+   - Payment status transitions: createBooking sets paid immediately for online+paymentMethod; walk-in pending; cancel sets cancelled.
+
+## STATE (gap closure, latest)
+- All OAuth fallback removed from context.ts; useAuth.ts cleaned; MyBookings supports reference search (db.ts listPlayerBookings).
+- New vitest suites appended: auth.ownerLogin (4 tests), customer signup/login (5), payment status (3). baseCtx now has res.cookie mock. Test payment checks use getBookingByRef (drizzle select, NOT db.query which doesn't exist on drizzle client).
+- NEXT: run pnpm test (expect 40/40), pnpm check, webdev_take_screenshot (/,/customer-login,/owner-login,/owner-app), then webdev_save_checkpoint, then deliver with creds: owner app login at /owner-login, username `owner`, password `Pickleyard2026!`.
+- Dev server log shows old stale esbuild errors (14:34) — ignore, only check latest timestamps.
+
 ## REMAINING
 A. Fix failing tests (26/28 pass, 2 fail):
    - Test "denies owner-scoped actions when no venues are owned" line ~437: ownerCtx() now has type='owner' so ownsAllVenues=true → myVenues returns ALL venues instead of []. FIX: make a legacy-scope context: { id, type:'customer', role:'owner', identity:'legacy-owner' } — but then ownerProcedure requires role==='owner' ✓. So ownerCtxForTestLegacy = baseCtx({id, type:'customer', identity:`owner-${id}`, role:'owner'}).

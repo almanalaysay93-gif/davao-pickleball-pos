@@ -97,7 +97,7 @@ export default function MyBookings() {
               <Input
                 value={query}
                 onChange={e => setQuery(e.target.value)}
-                placeholder="Phone, name, or email used at booking…"
+                placeholder="Booking reference, phone, name, or email…"
                 className="pl-9"
               />
             </div>

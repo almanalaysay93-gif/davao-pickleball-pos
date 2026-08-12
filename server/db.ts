@@ -373,7 +373,11 @@ export async function listPlayerBookings(identifier: string) {
     .where(
       and(
         inArray(bookings.paymentStatus, ["pending", "paid"]),
-        or(like(bookings.contact, `%${term}%`), like(bookings.playerName, `%${term}%`)),
+        or(
+          like(bookings.contact, `%${term}%`),
+          like(bookings.playerName, `%${term}%`),
+          eq(bookings.reference, term),
+        ),
       ),
     )
     .orderBy(desc(bookings.createdAt))
