@@ -7,6 +7,18 @@ import { useState } from "react";
 import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { KeyRound, ShieldCheck } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+
+const venueAccounts = [
+  { name: "Arena Athletics", hint: "arena athletics" },
+  { name: "Southside Davao", hint: "southside davao" },
+  { name: "Matina Town Square", hint: "matina town square" },
+  { name: "Paddle Up Davao", hint: "paddle up davao" },
+  { name: "CrisRon", hint: "crisron" },
+  { name: "PickleVille", hint: "pickleville" },
+  { name: "Durian Pickleball House", hint: "durian pickleball house" },
+  { name: "929 Pickleyard", hint: "929 pickleyard" },
+];
 
 export default function OwnerLogin() {
   const [, navigate] = useLocation();
@@ -35,6 +47,29 @@ export default function OwnerLogin() {
         <p className="mt-2 text-sm text-muted-foreground text-center">
           Manage your courts, rates, bookings, and announcements.
         </p>
+
+        <div className="mt-4 text-center text-xs text-muted-foreground">
+          Your username is your court's name — or tap below to fill it in.
+        </div>
+        <div className="mt-2 flex justify-center">
+          <Select
+            value={username || undefined}
+            onValueChange={v => setUsername(v)}>
+            <SelectTrigger className="w-full max-w-md bg-background" aria-label="Select your venue">
+              <SelectValue placeholder="Quick select your venue account" />
+            </SelectTrigger>
+            <SelectContent className="max-h-64">
+              {venueAccounts.map(v => (
+                <SelectItem key={v.name} value={v.name}>
+                  {v.name}
+                </SelectItem>
+              ))}
+              <SelectItem value="owner">
+                owner <span className="text-muted-foreground">(system admin)</span>
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
 
         <Card className="mt-8 border-border bg-card">
           <CardHeader>

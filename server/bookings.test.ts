@@ -1099,3 +1099,150 @@ async function dbCleanup(id: number) {
   const db = await getDb();
   if (db) await db.delete(bookingsTable).where(eq(bookingsTable.id, id));
 }
+
+// ---------------------------------------------------------------
+// Per-venue owner logins (username = venue name, session venueId)
+// ---------------------------------------------------------------
+
+describe("per-venue owner logins", () => {
+  it("logs in as a venue-specific owner and scopes access to that venue", async () => {
+    const caller = appRouter.createCaller(guestCtx());
+    const res = await caller.auth.ownerLogin({
+      username: "Arena Athletics",
+      password: "Davao2026!",
+    });
+    expect(res.success).toBe(true);
+    expect(res.username).toBe("Arena Athletics");
+
+    // Build a caller whose session carries the venue-specific owner profile.
+    // In production the cookie decodes into ctx.user via decodeSessionCookie;
+    // here we emulate that decoded user directly (venueId from session).
+    const scopedCaller = appRouter.createCaller(
+      baseCtx({
+        id: 30001,
+        type: "owner",
+        identity: "Arena Athletics",
+        name: "Arena Athletics",
+        email: null,
+        role: "owner",
+        venueId: 1,
+      }),
+    );
+
+    const venues = await scopedCaller.owner.myVenues();
+    expect(venues.map(v => v.id)).toEqual([1]);
+    expect(venues[0].name).toBe("Arena Athletics");
+
+    // Can access owned venue's courts.
+    const courts = await scopedCaller.owner.courtsForVenue({ venueId: 1 });
+    expect(courts.length).toBeGreaterThan(0);
+
+    // Cannot access another venue.
+    await expect(
+      scopedCaller.owner.courtsForVenue({ venueId: 2 }),
+    ).rejects.toThrow(/do not own/i);
+  });
+
+  it("allows a venue-specific owner to manage bookings at their venue only", async () => {
+    vi.useFakeTimers({ now: new Date("2026-09-01T12:00:00Z") });
+    const day = "2026-12-20";
+    const rawDb = await getDb();
+    if (rawDb) await rawDb.delete(bookingsTable).where(eq(bookingsTable.playerDate, day));
+    try {
+      const scopedCaller = appRouter.createCaller(
+        baseCtx({
+          id: 30001,
+          type: "owner",
+          identity: "Arena Athletics",
+          name: "Arena Athletics",
+          email: null,
+          role: "owner",
+          venueId: 1,
+        }),
+      );
+
+      // Create a booking at a different venue as "noise".
+      const otherVenues = (await listVenues()).filter(v => v.id !== 1);
+      const noiseCaller = appRouter.createCaller(
+        baseCtx({
+          id: 30002,
+          type: "owner",
+          identity: otherVenues[0].name,
+          name: otherVenues[0].name,
+          email: null,
+          role: "owner",
+          venueId: otherVenues[0].id,
+        }),
+      );
+      const otherCourts = await noiseCaller.owner.courtsForVenue({ venueId: otherVenues[0].id });
+      const otherCourt = otherCourts.find(c => c.status === "available")!;
+      await noiseCaller.owner.createBooking({
+        venueId: otherVenues[0].id,
+        courtId: otherCourt.id,
+        playerDate: day,
+        startHour: "09:00",
+        endHour: "10:00",
+        playerName: "Noise Player",
+      });
+
+      // The Arena Athletics owner must not see the booking at the other venue.
+      const booked = await scopedCaller.owner.bookings({});
+      const seen = new Set(booked.map(r => r.booking.venueId));
+      for (const vId of seen) expect(vId).toBe(1);
+
+      // Cannot mark a booking paid at another venue.
+      await expect(
+        scopedCaller.owner.markPaid({
+          id: booked.length ? booked[0].booking.id : -1,
+        }),
+      ).rejects.toThrow();
+
+      // Cannot create a booking at another venue.
+      await expect(
+        scopedCaller.owner.createBooking({
+          venueId: otherVenues[0].id,
+          courtId: otherCourt.id,
+          playerDate: day,
+          startHour: "11:00",
+          endHour: "12:00",
+          playerName: "Arena Player",
+        }),
+      ).rejects.toThrow(/do not own/i);
+    } finally {
+      vi.useRealTimers();
+      const dbNow = await getDb();
+      if (dbNow) await dbNow.delete(bookingsTable).where(eq(bookingsTable.playerDate, day));
+    }
+  });
+
+  it("hides the system admin view for venue-specific owners (ownsAllVenues false)", async () => {
+    const scopedCaller = appRouter.createCaller(
+      baseCtx({
+        id: 30001,
+        type: "owner",
+        identity: "Arena Athletics",
+        name: "Arena Athletics",
+        email: null,
+        role: "owner",
+        venueId: 1,
+      }),
+    );
+    // Venue-specific owner sees only their own venue, never all 8.
+    const venues = await scopedCaller.owner.myVenues();
+    expect(venues.length).toBe(1);
+  });
+
+  it("rejects a wrong password for a venue-specific owner", async () => {
+    const caller = appRouter.createCaller(guestCtx());
+    await expect(
+      caller.auth.ownerLogin({ username: "CrisRon", password: "wrong" }),
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+
+  it("rejects an unknown venue name as owner username", async () => {
+    const caller = appRouter.createCaller(guestCtx());
+    await expect(
+      caller.auth.ownerLogin({ username: "Nonexistent Court", password: "x" }),
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+});

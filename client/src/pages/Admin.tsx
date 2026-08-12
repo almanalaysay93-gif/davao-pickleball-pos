@@ -47,7 +47,11 @@ export default function Admin() {
     );
   }
 
-  if (!user || (user.type !== "owner" && user.role !== "owner")) {
+  const isGlobalOwner =
+    (user?.type === "owner" || user?.role === "owner") &&
+    (user as { venueId?: number | null } | undefined)?.venueId == null;
+
+  if (!user || !isGlobalOwner) {
     return (
       <div className="container py-24 text-center fade-in">
         <Card className="max-w-sm mx-auto border-border">

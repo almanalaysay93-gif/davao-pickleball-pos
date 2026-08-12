@@ -25,6 +25,10 @@ export default function OwnerLayout({ children }: { children: ReactNode }) {
   // The fixed-password owner session carries role "owner"; system-admin
   // duties (venue owners panel) are also exposed through this session.
   const isOwner = user?.type === "owner" || user?.role === "owner";
+  // Global owner = owns every venue; venue-specific owners carry a venueId
+  // in their session and are hidden from the system-wide admin console.
+  const isGlobalOwner =
+    isOwner && (user as { venueId?: number | null } | undefined)?.venueId == null;
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50">
@@ -60,7 +64,7 @@ export default function OwnerLayout({ children }: { children: ReactNode }) {
                   {l.label}
                 </Link>
               ))}
-            {isOwner && (
+            {isGlobalOwner && (
               <Link
                 href="/owner-app/admin"
                 className={cn(
@@ -123,6 +127,7 @@ export default function OwnerLayout({ children }: { children: ReactNode }) {
                 {l.label}
               </Link>
             ))}
+            {isGlobalOwner && (
             <Link
               href="/owner-app/admin"
               onClick={() => setMobileOpen(false)}
@@ -130,6 +135,7 @@ export default function OwnerLayout({ children }: { children: ReactNode }) {
               <Lock className="h-4 w-4" />
               System Admin
             </Link>
+            )}
           </nav>
         )}
       </header>

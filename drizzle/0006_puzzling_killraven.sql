@@ -1,0 +1,1 @@
+ALTER TABLE `ownerCredentials` ADD `venueId` int;

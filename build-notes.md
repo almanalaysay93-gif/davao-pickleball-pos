@@ -69,3 +69,16 @@ C. Run pnpm test → all pass; pnpm check; screenshots /, /customer-login, /owne
 - Owner portal routes: /owner-app (dashboard), /owner-app/bookings, /owner-app/announcements, /owner-app/admin.
 - Customer routes: /, /courts, /schedule, /book, /checkout, /confirmation/:ref, /my-bookings, /customer-login.
 - Admin panel (System Admin, /owner-app/admin): grantOwnership by email (requires user exists in users table via upsertUser/OAuth sign-in) + owners list — legacy but still works for existing data.
+
+## NEW TASK: Per-venue owner logins (username = venue name)
+Plan:
+1. owner_credentials already has (id, username, passwordHash) — add `venueId int nullable` column via drizzle migrate + webdev_execute_sql.
+2. Seed 8 rows: username = exact venue name (see venues table), venueId = venue id, passwordHash bcrypt of per-venue password (derive: `${VenueName}Owner2026` normalized?). Keep the existing 'owner' generic row (id=1, no venueId) as super login that sees all venues (ownsAllVenues).
+3. server/auth.ts ownerLogin: on success, attach venueId(s) to JWT payload (ownerSession). For generic 'owner' user → ownsAllVenues. For venue-specific → ownedVenueIds = [venueId].
+4. server/_core/context.ts: decode owner session → ctx.user includes role:'owner' + ownedVenueIds (if ownsAll) else array. Update ownerProcedure (routers.ts) to use ctx.user.ownedVenueIds when present (already does ownsVenue helpers via ctx.user.id? NO — current ownerProcedure enriches ownedVenueIds from DB via listOwnerVenueIds(ctx.user.id) which depends on venueOwners table. Must ALSO inject from session when user.type==='owner' and no venueOwner rows exist).
+5. Owner portal (/owner-app): venue-scoped login should only manage that venue: myVenues, courts, bookings, announcements already scope by ownedVenueIds → automatic if enrichment works.
+6. Admin console: venue logins should NOT see system admin (gate on ownsAllVenues).
+7. Vitest: venue login scoping + cross-venue isolation; existing suites + new cases.
+8. Deliver: table of 8 venue credentials (username exact name, password).
+Current state (verified earlier): 40/40 tests pass; checkpoint 470508ac delivered. Dev server log has stale esbuild errors (14:34) — ignore old timestamps.
+Key files: server/auth.ts (decodeSessionCookie, ownerSession JWT), server/_core/context.ts (user construction + ownedVenueIds enrichment), server/routers.ts (ownerProcedure, ownsVenue helpers, owner.myVenues), drizzle/schema.ts (ownerCredentials table), seed-owner.mjs (pattern for seeding).

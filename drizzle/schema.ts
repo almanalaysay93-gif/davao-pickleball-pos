@@ -149,6 +149,9 @@ export const ownerCredentials = mysqlTable("ownerCredentials", {
   id: int("id").autoincrement().primaryKey(),
   username: varchar("username", { length: 64 }).notNull().unique(),
   passwordHash: varchar("passwordHash", { length: 255 }).notNull(),
+  // Null/undefined = system owner login that can manage all venues;
+  // set = venue-specific owner login scoped to that single venue.
+  venueId: int("venueId"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 

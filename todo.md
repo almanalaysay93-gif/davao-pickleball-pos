@@ -105,7 +105,15 @@
 - [x] Typecheck, screenshots both apps, checkpoint 8f124f36, deliver with owner credentials
 
 ## Gap Closure After Checkpoint 8f124f36
-- [ ] Remove OAuth fallback from server/_core/context.ts and remaining startLogin/OAuth flow code
-- [ ] Verify MyBookings.tsx guest lookup by reference/name/phone; implement missing fields
-- [ ] Add vitest cases for customer sign-up/login/logout, owner fixed-password login/logout, guest booking, payment method/status transitions
-- [ ] Typecheck, tests, checkpoint, deliver
+- [x] Remove OAuth fallback from server/_core/context.ts and remaining startLogin/OAuth flow code
+- [x] Verify MyBookings.tsx guest lookup by reference/name/phone; implement missing fields
+- [x] Add vitest cases for customer sign-up/login/logout, owner fixed-password login/logout, guest booking, payment method/status transitions (40/40 passing)
+- [x] Typecheck, tests, checkpoint 470508ac, deliver
+
+## Per-Venue Owner Logins
+- [x] Schema/seed: one owner credential row per venue (username = venue name) with venueId binding
+- [x] Auth: owner login resolves venue by username and injects venue-scoped identity
+- [x] Owner portal: venue login sees only its own venue's courts/rates/bookings/announcements (backend + UI tab gating, System Admin hidden for venue owners)
+- [x] Vitest coverage: venue login scoping + cross-venue isolation (45/45 passing)
+- [x] Bug fix: added cookie-parser middleware (session cookies were never read — auth.me returned null after login) and updated UI login quick-select for all 8 venues (45/45 passing)
+- [x] Typecheck, tests, checkpoint, deliver with per-venue credentials list

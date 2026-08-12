@@ -48,10 +48,15 @@ const ownerProcedure = publicProcedure.use(async ({ ctx, next }) => {
   if (!ctx.user || ctx.user.role !== "owner") {
     throw new TRPCError({ code: "FORBIDDEN", message: "Venue owner access required" });
   }
-  // The fixed-password owner login manages all venues system-wide. Legacy
-  // OAuth-sourced owners stay scoped to their assigned venues.
-  const ownsAllVenues = ctx.user.type === "owner";
-  const ownedVenueIds: number[] = ownsAllVenues ? [] : await db.listOwnerVenueIds(ctx.user.id);
+  // Venue-specific owner logins carry the venueId in their session. The
+  // global "owner" account (no venueId) manages all venues system-wide.
+  // Legacy OAuth-sourced owners (type 'customer', role 'owner') stay scoped
+  // to their venueOwners rows for backward compatibility.
+  const sessionVenueId = (ctx.user as AppUser & { venueId?: number | null }).venueId;
+  const ownsAllVenues = sessionVenueId == null && ctx.user.type === "owner";
+  const ownedVenueIds: number[] = sessionVenueId
+    ? [sessionVenueId]
+    : await db.listOwnerVenueIds(ctx.user.id);
   return next({ ctx: { ...ctx, ownsAllVenues, ownedVenueIds } });
 });
 
@@ -150,14 +155,14 @@ export const appRouter = router({
       .input(z.object({ username: z.string().min(1), password: z.string().min(1) }))
       .mutation(async ({ input, ctx }) => {
         const [rows] = await getAuthPool().query(
-          "SELECT id, username, passwordHash FROM ownerCredentials WHERE username = ? LIMIT 1",
+          "SELECT id, username, passwordHash, venueId FROM ownerCredentials WHERE username = ? LIMIT 1",
           [input.username],
         );
         const row = (rows as any[])[0];
         if (!row || !(await verifyPassword(input.password, row.passwordHash))) {
           throw new TRPCError({ code: "UNAUTHORIZED", message: "Invalid owner credentials" });
         }
-        setOwnerCookie(ctx.res, row.username, row.id);
+        setOwnerCookie(ctx.res, row.username, row.id, row.venueId ?? null);
         return { success: true, username: row.username } as const;
       }),
 
@@ -442,9 +447,11 @@ export const appRouter = router({
   /** Owner portal: manage the venues this owner owns. */
   owner: router({
     myVenues: ownerProcedure.query(async ({ ctx }) => {
-      // Fixed-password owner manages all venues.
+      // Venue-specific owner logins see only their venue; the global owner
+      // account ("owner") manages all venues system-wide.
       if (ctx.ownsAllVenues) return db.listVenues();
-      return db.listOwnerVenues(ctx.user!.id);
+      const venue = await db.getVenueById(ctx.ownedVenueIds[0]);
+      return venue ? [venue] : [];
     }),
 
     courtsForVenue: ownerProcedure

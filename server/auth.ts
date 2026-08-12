@@ -24,13 +24,20 @@ export type AppUser = {
   email?: string | null;
   /** Owner session role: "owner". */
   role: "owner" | "customer";
+  /** Set for venue-specific owner logins; null for the global system owner. */
+  venueId?: number | null;
 };
 
 const OWNER_COOKIE = "ownerSession";
 const CUSTOMER_COOKIE = "customerSession";
 const MAX_AGE_SECONDS = 60 * 60 * 24 * 30; // 30 days
 
-type OwnerPayload = { sub: number; type: "owner"; username: string };
+type OwnerPayload = {
+  sub: number;
+  type: "owner";
+  username: string;
+  venueId?: number | null;
+};
 type CustomerPayload = { sub: number; type: "customer"; accountId: number; email: string };
 
 function signToken(payload: OwnerPayload | CustomerPayload): string {
@@ -57,6 +64,7 @@ export async function decodeSessionCookie(req: Request): Promise<AppUser | null>
             name: payload.username,
             email: null,
             role: "owner",
+            venueId: payload.venueId ?? null,
           };
         }
       }
@@ -88,8 +96,16 @@ export async function decodeSessionCookie(req: Request): Promise<AppUser | null>
   return null;
 }
 
-export function setOwnerCookie(res: any, username: string, id: number) {
-  res.cookie(OWNER_COOKIE, signToken({ sub: id, type: "owner", username }), {
+export function setOwnerCookie(
+  res: any,
+  username: string,
+  id: number,
+  venueId: number | null = null
+) {
+  res.cookie(
+    OWNER_COOKIE,
+    signToken({ sub: id, type: "owner", username, venueId }),
+    {
     httpOnly: true,
     secure: false,
     sameSite: "lax",
