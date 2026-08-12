@@ -300,7 +300,7 @@ function OwnerWalkInDialog() {
   const utils = trpc.useUtils();
   const { data: myVenues } = trpc.owner.myVenues.useQuery(undefined, { refetchOnWindowFocus: false });
   const [open, setOpen] = useState(false);
-  const venueId = myVenues?.[0]?.id ?? null;
+  const [venueId, setVenueId] = useState<number | null>(myVenues?.[0]?.id ?? null);
   const courtsQuery = trpc.owner.courtsForVenue.useQuery(
     { venueId: venueId ?? 0 },
     { enabled: venueId !== null, refetchOnWindowFocus: false },
@@ -363,7 +363,12 @@ function OwnerWalkInDialog() {
           {myVenues && myVenues.length > 1 && (
             <div className="space-y-1.5 sm:col-span-2">
               <Label>Venue *</Label>
-              <Select value={String(myVenues[0].id)}>
+              <Select
+                value={venueId !== null ? String(venueId) : undefined}
+                onValueChange={v => {
+                  setVenueId(Number(v));
+                  setCourtId(null);
+                }}>
                 <SelectTrigger className="bg-background">
                   <SelectValue />
                 </SelectTrigger>

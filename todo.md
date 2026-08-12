@@ -51,7 +51,7 @@
 - [x] Screenshots verified, checkpoint, deliver
 
 ## Dual-Role Gaps to Close
-- [ ] Add owner-side walk-in booking flow (reuse Admin WalkInDialog pattern) on Owner portal
-- [ ] Strengthen RBAC tests: signed-in player denied owner routes, two-owner isolation
-- [ ] Role-aware sign-in UX/messaging on Owner page (keep owner gate messaging)
-- [ ] Screenshot verification + checkpoint + deliver
+- [x] Add owner-side walk-in booking flow (reuse Admin WalkInDialog pattern) on Owner portal
+- [x] Strengthen RBAC tests: signed-in player denied owner routes, two-owner isolation
+- [x] Role-aware sign-in UX/messaging on Owner page (keep owner gate messaging)
+- [x] Screenshot verification + checkpoint + deliver
