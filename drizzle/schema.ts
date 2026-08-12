@@ -105,3 +105,21 @@ export const venueOwners = mysqlTable("venueOwners", {
 
 export type VenueOwner = typeof venueOwners.$inferSelect;
 export type InsertVenueOwner = typeof venueOwners.$inferInsert;
+
+/**
+ * Venue announcements: owner-posted notices visible to players
+ * (e.g. courts closed for a party, tournaments, special events).
+ */
+export const announcements = mysqlTable("announcements", {
+  id: int("id").autoincrement().primaryKey(),
+  venueId: int("venueId").notNull(),
+  title: varchar("title", { length: 160 }).notNull(),
+  message: text("message").notNull(),
+  active: int("active").notNull().default(1), // 1 = visible, 0 = hidden
+  expireAt: timestamp("expireAt"), // null = no expiry
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type Announcement = typeof announcements.$inferSelect;
+export type InsertAnnouncement = typeof announcements.$inferInsert;

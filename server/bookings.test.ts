@@ -1,8 +1,8 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { appRouter } from "./routers";
 import type { TrpcContext } from "./_core/context";
-import { bookings as bookingsTable, venueOwners } from "../drizzle/schema";
-import { and, eq, sql } from "drizzle-orm";
+import { announcements as announcementsTable, bookings as bookingsTable, venueOwners } from "../drizzle/schema";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { getDb, getUserByEmail, upsertUser, listVenues } from "./db";
 
 // ---------------------------------------------------------------
@@ -482,4 +482,240 @@ describe("dual-role: player & owner routers", () => {
       }
     }
   });
+});
+
+describe("announcements & owner booking", () => {
+  it("owners can create announcements scoped to their venue and players see only active ones", async () => {
+    vi.useFakeTimers({ now: new Date("2026-09-01T12:00:00Z") });
+    const email = `announce-test-${Date.now()}@example.com`;
+    try {
+      await upsertUser({ openId: `test-${email}`, email, role: "user" });
+      const seeded = await getUserByEmail(email);
+      expect(seeded).toBeDefined();
+      const adminCaller = appRouter.createCaller(adminCtx());
+      const venueRows = await listVenues();
+      const arena = venueRows.find(v => v.name === "Arena Athletics")!;
+      await adminCaller.admin.grantOwnership({ venueId: arena.id, email });
+      const seededAgain = await getUserByEmail(email);
+      const ownerCaller = appRouter.createCaller(
+        baseCtx({ ...seededAgain!, openId: `owner-${seededAgain!.id}`, lastSignedIn: new Date() }),
+      );
+
+      // Player cannot manage announcements
+      const playerCaller = appRouter.createCaller(
+        baseCtx({
+          id: 9001,
+          openId: "player-ann",
+          email: "pl-ann@example.com",
+          name: "Player",
+          loginMethod: "manus",
+          role: "player",
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          lastSignedIn: new Date(),
+        }),
+      );
+      await expect(
+        playerCaller.owner.createAnnouncement({ venueId: arena.id, title: "t", message: "m" }),
+      ).rejects.toThrow();
+
+      // Owner creates an announcement (procedure returns {success:true})
+      const created = await ownerCaller.owner.createAnnouncement({
+        venueId: arena.id,
+        title: "Courts closed today",
+        message: "Private party all evening.",
+        expireAt: null,
+      });
+      expect(created.success).toBe(true);
+      // Confirm the row landed in the database.
+      const rawDb = await getDb();
+      const createdRow = await rawDb
+        .select()
+        .from(announcementsTable)
+        .where(
+          and(eq(announcementsTable.venueId, arena.id), eq(announcementsTable.title, "Courts closed today")),
+        )
+        .limit(1);
+      expect(createdRow.length).toBe(1);
+      const annId = createdRow[0].id;
+
+      // Players see active announcements publicly
+      const list = await appRouter.createCaller(guestCtx()).announcements.list();
+      expect(list.some((a: any) => a.title === "Courts closed today" && a.active === 1)).toBe(true);
+
+      // Inactive announcements are hidden from players
+      await ownerCaller.owner.updateAnnouncement({ id: annId, active: 0 });
+      const list2 = await appRouter.createCaller(guestCtx()).announcements.list();
+      expect(list2.every((a: any) => a.title !== "Courts closed today")).toBe(true);
+
+      // Cleanup
+      await ownerCaller.owner.deleteAnnouncement({ id: annId });
+      const list3 = await appRouter.createCaller(guestCtx()).announcements.list();
+      expect(list3.every((a: any) => a.title !== "Courts closed today")).toBe(true);
+    } finally {
+      vi.useRealTimers();
+      const rawDb = await getDb();
+      if (rawDb) {
+        await rawDb.delete(venueOwners).where(sql`1 = 1`).catch(() => undefined);
+        await rawDb.delete(announcementsTable).where(sql`1 = 1`).catch(() => undefined);
+      }
+    }
+  }, 30000);
+
+  it("expired announcements are hidden from the public list", async () => {
+    vi.useFakeTimers({ now: new Date("2026-08-01T12:00:00Z") });
+    const email = `expiry-test-${Date.now()}@example.com`;
+    try {
+      await upsertUser({ openId: `test-${email}`, email, role: "user" });
+      const seeded = await getUserByEmail(email);
+      expect(seeded).toBeDefined();
+      const adminCaller = appRouter.createCaller(adminCtx());
+      const venueRows = await listVenues();
+      const arena = venueRows.find(v => v.name === "Arena Athletics")!;
+      await adminCaller.admin.grantOwnership({ venueId: arena.id, email });
+      const seededAgain = await getUserByEmail(email);
+      const ownerCaller = appRouter.createCaller(
+        baseCtx({ ...seededAgain!, openId: `owner-${seededAgain!.id}`, lastSignedIn: new Date() }),
+      );
+
+      // Announcement that expired yesterday
+      const oldCreated = await ownerCaller.owner.createAnnouncement({
+        venueId: arena.id,
+        title: "Old notice",
+        message: "No longer relevant",
+        expireAt: new Date("2026-07-31T12:00:00Z").toISOString(),
+      });
+      expect(oldCreated.success).toBe(true);
+
+      const list = await appRouter.createCaller(guestCtx()).announcements.list();
+      expect(list.every((a: any) => a.title !== "Old notice")).toBe(true);
+
+      // Announcement expiring tomorrow is visible
+      const futCreated = await ownerCaller.owner.createAnnouncement({
+        venueId: arena.id,
+        title: "Future notice",
+        message: "Still coming",
+        expireAt: new Date("2026-08-02T12:00:00Z").toISOString(),
+      });
+      expect(futCreated.success).toBe(true);
+      const rawDb = await getDb();
+      const rows = await rawDb
+        .select()
+        .from(announcementsTable)
+        .where(eq(announcementsTable.venueId, arena.id))
+        .orderBy(desc(announcementsTable.id));
+      const oldRow = rows.find(r => r.title === "Old notice")!;
+      const futRow = rows.find(r => r.title === "Future notice")!;
+
+      const list2 = await appRouter.createCaller(guestCtx()).announcements.list();
+      expect(list2.some((a: any) => a.title === "Future notice")).toBe(true);
+
+      await ownerCaller.owner.deleteAnnouncement({ id: oldRow.id });
+      await ownerCaller.owner.deleteAnnouncement({ id: futRow.id });
+    } finally {
+      vi.useRealTimers();
+      const rawDb = await getDb();
+      if (rawDb) {
+        await rawDb.delete(venueOwners).where(sql`1 = 1`).catch(() => undefined);
+        await rawDb.delete(announcementsTable).where(sql`1 = 1`).catch(() => undefined);
+      }
+    }
+  }, 30000);
+
+  it("owner.createBooking books at owned venues and rejects non-owned ones", async () => {
+    vi.useFakeTimers({ now: new Date("2026-09-01T12:00:00Z") });
+    const email = `owner-book-${Date.now()}@example.com`;
+    const rawDb = await getDb();
+    if (rawDb) {
+      await rawDb.delete(venueOwners).where(sql`1 = 1`).catch(() => undefined);
+    }
+    try {
+      await upsertUser({ openId: `test-${email}`, email, role: "user" });
+      const seeded = await getUserByEmail(email);
+      expect(seeded).toBeDefined();
+      const adminCaller = appRouter.createCaller(adminCtx());
+      const venueRows = await listVenues();
+      const arena = venueRows.find(v => v.name === "Arena Athletics")!;
+      await adminCaller.admin.grantOwnership({ venueId: arena.id, email });
+      const seededAgain = await getUserByEmail(email);
+      const ownerCaller = appRouter.createCaller(
+        baseCtx({ ...seededAgain!, openId: `owner-${seededAgain!.id}`, lastSignedIn: new Date() }),
+      );
+
+      // Booking at a venue the owner does NOT own must fail
+      const other = venueRows.find(v => v.id !== arena.id)!;
+      await expect(
+        ownerCaller.owner.createBooking({
+          venueId: other.id,
+          courtId: 1,
+          playerDate: "2027-02-01",
+          startHour: "10:00",
+          endHour: "11:00",
+          playerName: "Owner Player",
+        }),
+      ).rejects.toThrow();
+
+      // Booking at an owned venue succeeds
+      const courts = await ownerCaller.owner.courtsForVenue({ venueId: arena.id });
+      const court = courts.find(c => c.status === "available")!;
+      await rawDb
+        .delete(bookingsTable)
+        .where(eq(bookingsTable.playerDate, "2027-03-01"))
+        .catch(() => undefined);
+
+      const res = await ownerCaller.owner.createBooking({
+        venueId: arena.id,
+        courtId: court.id,
+        playerDate: "2027-03-01",
+        startHour: "14:00",
+        endHour: "15:00",
+        playerName: "Owner Player",
+      });
+      expect(res.reference).toMatch(/^DV-PB-[A-Z0-9]+$/);
+
+      // Conflicts are still enforced for owner bookings
+      await expect(
+        ownerCaller.owner.createBooking({
+          venueId: arena.id,
+          courtId: court.id,
+          playerDate: "2027-03-01",
+          startHour: "14:30",
+          endHour: "15:30",
+          playerName: "Owner Player 2",
+        }),
+      ).rejects.toThrow();
+
+      // Player cannot call owner.createBooking at all
+      const playerCaller = appRouter.createCaller(
+        baseCtx({
+          id: 9002,
+          openId: "player-ownbook",
+          email: "pl-ownbook@example.com",
+          name: "Player",
+          loginMethod: "manus",
+          role: "player",
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          lastSignedIn: new Date(),
+        }),
+      );
+      await expect(
+        playerCaller.owner.createBooking({
+          venueId: arena.id,
+          courtId: court.id,
+          playerDate: "2027-03-02",
+          startHour: "14:00",
+          endHour: "15:00",
+          playerName: "Player",
+        }),
+      ).rejects.toThrow();
+    } finally {
+      vi.useRealTimers();
+      const rawDb2 = await getDb();
+      if (rawDb2) {
+        await rawDb2.delete(bookingsTable).where(eq(bookingsTable.playerDate, "2027-03-01")).catch(() => undefined);
+        await rawDb2.delete(venueOwners).where(sql`1 = 1`).catch(() => undefined);
+      }
+    }
+  }, 60000);
 });

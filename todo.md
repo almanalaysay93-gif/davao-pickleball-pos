@@ -55,3 +55,13 @@
 - [x] Strengthen RBAC tests: signed-in player denied owner routes, two-owner isolation
 - [x] Role-aware sign-in UX/messaging on Owner page (keep owner gate messaging)
 - [x] Screenshot verification + checkpoint + deliver
+
+## Owner Booking + Announcements
+- [ ] announcements table in schema (venueId, title, message, active flag, expiry) + migration applied
+- [ ] owner can book courts: grant role access and hook owner portal into the same booking/checkout flow
+- [ ] owner.announcements router: create/list/update/delete scoped to owned venues
+- [ ] public announcements router for player-facing display
+- [ ] Announcements management section in Owner portal (create/edit, set expiry, toggle active)
+- [ ] Announcement banners visible to players: Home, Courts, Schedule, Book pages (scoped per venue + active ones)
+- [ ] Vitest coverage for announcements RBAC + owner booking
+- [ ] Screenshots verified, checkpoint, deliver

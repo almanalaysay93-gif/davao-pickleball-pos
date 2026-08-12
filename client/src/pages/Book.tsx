@@ -17,6 +17,7 @@ import { useMemo, useState } from "react";
 import { useLocation, useSearch } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { useBooking } from "@/contexts/BookingContext";
+import { AnnouncementsBanner } from "@/components/AnnouncementsBanner";
 
 export default function Book() {
   const [, navigate] = useLocation();
@@ -153,6 +154,13 @@ export default function Book() {
           and splits automatically when a session crosses 6:00 PM.
         </p>
       </div>
+
+      {/* Venue notices posted by owners */}
+      {venueId !== null && (
+        <div className="mt-6">
+          <AnnouncementsBanner venueId={venueId} />
+        </div>
+      )}
 
       <div className="mt-8 grid gap-6 lg:grid-cols-[1fr_380px] items-start">
         <Card className="border-border bg-card">

@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { Link } from "wouter";
 import { trpc } from "@/lib/trpc";
+import { AnnouncementsBanner } from "@/components/AnnouncementsBanner";
 
 const highlights = [
   {
@@ -229,7 +230,11 @@ export default function Home() {
         </div>
       </section>
 
-      {/* CTA */}
+      {/* Venue notices posted by owners */}
+      <section className="container pt-8">
+        <AnnouncementsBanner />
+      </section>
+
       <section className="container py-16 md:py-20">
         <div className="rounded-2xl bg-primary text-primary-foreground px-8 py-12 md:px-14 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
           <div>

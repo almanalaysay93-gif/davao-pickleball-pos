@@ -42,6 +42,64 @@ const bookingInput = z.object({
   paymentMethod: z.string().max(32).optional(),
 });
 
+type BookingInput = z.infer<typeof bookingInput>;
+
+/** Shared booking creation logic (validation + pricing + insert). Used by both public and owner flows. */
+async function createBookingInput(input: BookingInput): Promise<string> {
+  // Validate court belongs to venue
+  const courts = await db.listCourtsByVenue(input.venueId);
+  const court = courts.find(c => c.id === input.courtId);
+  if (!court) throw new TRPCError({ code: "NOT_FOUND", message: "Court not found" });
+  if (court.status === "maintenance") {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Court is under maintenance" });
+  }
+
+  // Validate date is not in the past (Asia/Manila)
+  const todayManila = new Date(
+    new Date().toLocaleString("en-US", { timeZone: "Asia/Manila" }),
+  );
+  const dateStr = `${todayManila.getFullYear()}-${String(todayManila.getMonth() + 1).padStart(2, "0")}-${String(todayManila.getDate()).padStart(2, "0")}`;
+  if (input.playerDate < dateStr) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Cannot book a past date" });
+  }
+
+  // Validate slot is within venue hours
+  const venue = await db.getVenueById(input.venueId);
+  if (!venue) throw new TRPCError({ code: "NOT_FOUND", message: "Venue not found" });
+  const slots = generateSlots(venue.openTime, venue.closeTime);
+  if (!slots.includes(input.startHour)) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid time slot for this venue" });
+  }
+
+  const conflict = await db.findConflictingBooking(
+    input.venueId,
+    input.courtId,
+    input.playerDate,
+    input.startHour,
+    input.endHour,
+  );
+  if (conflict.length > 0) {
+    throw new TRPCError({ code: "CONFLICT", message: "This slot is already booked" });
+  }
+
+  const tiers = await db.listRateTiersByVenue(input.venueId);
+  const pricing = priceSlot(input.startHour, input.endHour, tiers);
+
+  const reference = await db.generateReference();
+  await db.insertBooking({
+    ...input,
+    contact: input.contact ?? null,
+    paymentMethod: input.paymentMethod ?? null,
+    reference,
+    dayAmount: String(pricing.dayAmount),
+    nightAmount: String(pricing.nightAmount),
+    totalAmount: String(pricing.total),
+    paymentStatus: input.channel === "walkin" && input.paymentMethod ? "paid" : "pending",
+  });
+
+  return reference;
+}
+
 export const appRouter = router({
   system: systemRouter,
   auth: router({
@@ -119,57 +177,7 @@ export const appRouter = router({
 
     /** Create a booking (walk-in or online). */
     create: publicProcedure.input(bookingInput).mutation(async ({ input }) => {
-      // Validate court belongs to venue
-      const courts = await db.listCourtsByVenue(input.venueId);
-      const court = courts.find(c => c.id === input.courtId);
-      if (!court) throw new TRPCError({ code: "NOT_FOUND", message: "Court not found" });
-      if (court.status === "maintenance") {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "Court is under maintenance" });
-      }
-
-      // Validate date is not in the past (Asia/Manila)
-      const todayManila = new Date(
-        new Date().toLocaleString("en-US", { timeZone: "Asia/Manila" }),
-      );
-      const dateStr = `${todayManila.getFullYear()}-${String(todayManila.getMonth() + 1).padStart(2, "0")}-${String(todayManila.getDate()).padStart(2, "0")}`;
-      if (input.playerDate < dateStr) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "Cannot book a past date" });
-      }
-
-      // Validate slot is within venue hours
-      const venue = await db.getVenueById(input.venueId);
-      if (!venue) throw new TRPCError({ code: "NOT_FOUND", message: "Venue not found" });
-      const slots = generateSlots(venue.openTime, venue.closeTime);
-      if (!slots.includes(input.startHour)) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid time slot for this venue" });
-      }
-
-      const conflict = await db.findConflictingBooking(
-        input.venueId,
-        input.courtId,
-        input.playerDate,
-        input.startHour,
-        input.endHour,
-      );
-      if (conflict.length > 0) {
-        throw new TRPCError({ code: "CONFLICT", message: "This slot is already booked" });
-      }
-
-      const tiers = await db.listRateTiersByVenue(input.venueId);
-      const pricing = priceSlot(input.startHour, input.endHour, tiers);
-
-      const reference = await db.generateReference();
-      await db.insertBooking({
-        ...input,
-        contact: input.contact ?? null,
-        paymentMethod: input.paymentMethod ?? null,
-        reference,
-        dayAmount: String(pricing.dayAmount),
-        nightAmount: String(pricing.nightAmount),
-        totalAmount: String(pricing.total),
-        paymentStatus: input.channel === "walkin" && input.paymentMethod ? "paid" : "pending",
-      });
-
+      const reference = await createBookingInput(input);
       return { reference };
     }),
 
@@ -391,6 +399,108 @@ export const appRouter = router({
         }
         await db.updateBookingStatus(input.id, { paymentStatus: "cancelled" });
         return { success: true } as const;
+      }),
+
+    /** Owner: create a booking (owner reserves a court through the same flow). */
+    createBooking: ownerProcedure.input(bookingInput).mutation(async ({ input, ctx }) => {
+      const venue = await db.getVenueById(input.venueId);
+      if (!venue) throw new TRPCError({ code: "NOT_FOUND", message: "Venue not found" });
+      if (!ctx.ownedVenueIds.includes(venue.id)) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "You do not own this venue" });
+      }
+      // Reuse the public create flow by calling its inner mutation logic:
+      const reference = await createBookingInput(input);
+      return { reference } as const;
+    }),
+
+    /** Owner: list announcements at owned venues (all, incl. inactive). */
+    announcements: ownerProcedure
+      .input(
+        z
+          .object({ venueId: z.number().int().positive().optional() })
+          .optional(),
+      )
+      .query(async ({ input, ctx }) => {
+        const ids = input?.venueId
+          ? [input.venueId]
+          : ctx.ownedVenueIds;
+        const rows = await db.listVenueAnnouncements(ids);
+        return rows.filter(a => ctx.ownedVenueIds.includes(a.venueId));
+      }),
+
+    createAnnouncement: ownerProcedure
+      .input(
+        z.object({
+          venueId: z.number().int().positive(),
+          title: z.string().min(1).max(160),
+          message: z.string().min(1),
+          expireAt: z.string().datetime().nullable().optional(),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        if (!ctx.ownedVenueIds.includes(input.venueId)) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "You do not own this venue" });
+        }
+        await db.createAnnouncement({
+          venueId: input.venueId,
+          title: input.title.trim(),
+          message: input.message.trim(),
+          active: 1,
+          expireAt: input.expireAt ? new Date(input.expireAt) : null,
+        });
+        return { success: true } as const;
+      }),
+
+    updateAnnouncement: ownerProcedure
+      .input(
+        z.object({
+          id: z.number().int().positive(),
+          title: z.string().min(1).max(160).optional(),
+          message: z.string().min(1).optional(),
+          active: z.number().int().min(0).max(1).optional(),
+          expireAt: z.string().datetime().nullable().optional(),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        const { id, ...patch } = input;
+        const all = await db.listVenueAnnouncements(ctx.ownedVenueIds);
+        const row = all.find(a => a.id === id);
+        if (!row) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "This announcement is not at your venue" });
+        }
+        const set: Record<string, unknown> = {};
+        if (patch.title !== undefined) set.title = patch.title.trim();
+        if (patch.message !== undefined) set.message = patch.message.trim();
+        if (patch.active !== undefined) set.active = patch.active;
+        if (patch.expireAt !== undefined) set.expireAt = patch.expireAt ? new Date(patch.expireAt) : null;
+        await db.updateAnnouncement(id, set);
+        return { success: true } as const;
+      }),
+
+    deleteAnnouncement: ownerProcedure
+      .input(z.object({ id: z.number().int().positive() }))
+      .mutation(async ({ input, ctx }) => {
+        const all = await db.listVenueAnnouncements(ctx.ownedVenueIds);
+        const row = all.find(a => a.id === input.id);
+        if (!row) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "This announcement is not at your venue" });
+        }
+        await db.deleteAnnouncement(input.id);
+        return { success: true } as const;
+      }),
+  }),
+
+  /** Public announcements visible to players. */
+  announcements: router({
+    list: publicProcedure
+      .input(
+        z
+          .object({ venueId: z.number().int().positive().optional() })
+          .optional(),
+      )
+      .query(async ({ input }) => {
+        const ids = input?.venueId ? [input.venueId] : undefined;
+        return db.listActiveAnnouncements(ids);
       }),
   }),
 

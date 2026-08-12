@@ -29,7 +29,9 @@ import {
   KeyRound,
   Loader2,
   MapPin,
+  Megaphone,
   ReceiptText,
+  Trash2,
   UserPlus,
   Wrench,
 } from "lucide-react";
@@ -209,6 +211,7 @@ function OwnerDashboard() {
               <span className="text-xs text-muted-foreground">
                 {(bookings.data ?? []).length} records
               </span>
+              <OwnerBookDialog />
               <OwnerWalkInDialog />
             </div>
           </div>
@@ -293,6 +296,161 @@ function OwnerDashboard() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+function OwnerBookDialog() {
+  const utils = trpc.useUtils();
+  const { data: myVenues } = trpc.owner.myVenues.useQuery(undefined, { refetchOnWindowFocus: false });
+  const [open, setOpen] = useState(false);
+  const [venueId, setVenueId] = useState<number | null>(myVenues?.[0]?.id ?? null);
+  const courtsQuery = trpc.owner.courtsForVenue.useQuery(
+    { venueId: venueId ?? 0 },
+    { enabled: venueId !== null, refetchOnWindowFocus: false },
+  );
+  const [courtId, setCourtId] = useState<number | null>(null);
+  const [playerDate, setPlayerDate] = useState(() => {
+    const n = new Date();
+    return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`;
+  });
+  const [startHour, setStartHour] = useState("");
+  const [endHour, setEndHour] = useState("");
+  const [playerName, setPlayerName] = useState("");
+  const [contact, setContact] = useState("");
+
+  const quote = trpc.bookings.quote.useQuery(
+    { venueId: venueId ?? 0, courtId: courtId ?? 0, playerDate, startHour, endHour, playerName: "x" },
+    {
+      enabled: Boolean(venueId && courtId && startHour && endHour && playerDate && /^\d{2}:\d{2}$/.test(startHour) && /^\d{2}:\d{2}$/.test(endHour)),
+      refetchOnWindowFocus: false,
+    },
+  );
+
+  const create = trpc.owner.createBooking.useMutation({
+    onSuccess: res => {
+      toast.success("Your court is booked");
+      utils.owner.bookings.invalidate();
+      utils.availability.forVenueDate.invalidate();
+      setOpen(false);
+      window.location.href = `/confirmation/${res.reference}`;
+    },
+    onError: e => toast.error(e.message),
+  });
+
+  const submit = () => {
+    if (!playerName.trim() || venueId === null || !courtId || !playerDate || !startHour || !endHour) {
+      toast.error("Please complete all required fields");
+      return;
+    }
+    if (/^\d{2}:\d{2}$/.test(startHour) && /^\d{2}:\d{2}$/.test(endHour) && endHour <= startHour) {
+      toast.error("End time must be later than start time");
+      return;
+    }
+    create.mutate({
+      venueId,
+      courtId,
+      playerDate,
+      startHour,
+      endHour,
+      playerName: playerName.trim(),
+      contact: contact.trim() || undefined,
+      channel: "online",
+      paymentMethod: undefined,
+    });
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="outline" className="press bg-transparent">
+          <CalendarDays className="h-4 w-4 mr-1.5" /> Book a court
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Book a court at your venue</DialogTitle>
+          <DialogDescription>
+            Reserve a court for yourself or your staff through the same booking flow as
+            players — it appears in your reservations and blocks the slot for everyone.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {myVenues && myVenues.length > 1 && (
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label>Venue *</Label>
+              <Select
+                value={venueId !== null ? String(venueId) : undefined}
+                onValueChange={v => {
+                  setVenueId(Number(v));
+                  setCourtId(null);
+                }}>
+                <SelectTrigger className="bg-background">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {myVenues.map(v => (
+                    <SelectItem key={v.id} value={String(v.id)}>
+                      {v.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+          <div className="space-y-1.5">
+            <Label>Court *</Label>
+            <Select value={courtId !== null ? String(courtId) : undefined} onValueChange={v => setCourtId(Number(v))}>
+              <SelectTrigger className="bg-background">
+                <SelectValue placeholder="Select court" />
+              </SelectTrigger>
+              <SelectContent>
+                {(courtsQuery.data as any[])
+                  ?.filter((c: { status: string }) => c.status === "available")
+                  .map((c: { id: number; courtNumber: string }) => (
+                    <SelectItem key={c.id} value={String(c.id)}>
+                      {c.courtNumber}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Date *</Label>
+            <Input type="date" className="bg-background" value={playerDate} min={playerDate} onChange={e => setPlayerDate(e.target.value)} />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Start time *</Label>
+            <Input className="bg-background" placeholder="18:00" value={startHour} onChange={e => setStartHour(e.target.value)} />
+          </div>
+          <div className="space-y-1.5">
+            <Label>End time *</Label>
+            <Input className="bg-background" placeholder="20:00" value={endHour} onChange={e => setEndHour(e.target.value)} />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Player name *</Label>
+            <Input className="bg-background" placeholder="Juan Dela Cruz" value={playerName} onChange={e => setPlayerName(e.target.value)} maxLength={128} />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Contact</Label>
+            <Input className="bg-background" placeholder="09XX XXX XXXX" value={contact} onChange={e => setContact(e.target.value)} maxLength={64} />
+          </div>
+          <div className="sm:col-span-2 rounded-md bg-muted/40 px-3 py-2 text-xs">
+            <span className="font-semibold">Estimated total: </span>
+            {quote.data ? (
+              <span className="font-semibold text-primary">{formatPHP(quote.data.total)}</span>
+            ) : (
+              <span className="text-muted-foreground">Enter times to see the day/night rate breakdown</span>
+            )}
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" className="press bg-transparent" onClick={() => setOpen(false)}>Cancel</Button>
+          <Button className="press" onClick={submit} disabled={create.isPending}>
+            {create.isPending ? "Booking…" : "Confirm booking"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -444,6 +602,164 @@ function OwnerWalkInDialog() {
   );
 }
 
+function AnnouncementsSection({ venueId }: { venueId: number }) {
+  const utils = trpc.useUtils();
+  const [open, setOpen] = useState(false);
+  const [title, setTitle] = useState("");
+  const [message, setMessage] = useState("");
+  const [expireAt, setExpireAt] = useState("");
+
+  const anns = trpc.owner.announcements.useQuery(
+    { venueId },
+    { refetchOnWindowFocus: false },
+  );
+
+  const create = trpc.owner.createAnnouncement.useMutation({
+    onSuccess: () => {
+      toast.success("Announcement posted");
+      utils.owner.announcements.invalidate({ venueId });
+      utils.announcements.list.invalidate();
+      setOpen(false);
+      setTitle("");
+      setMessage("");
+      setExpireAt("");
+    },
+    onError: e => toast.error(e.message),
+  });
+  const toggle = trpc.owner.updateAnnouncement.useMutation({
+    onSuccess: () => {
+      utils.owner.announcements.invalidate({ venueId });
+      utils.announcements.list.invalidate();
+    },
+    onError: e => toast.error(e.message),
+  });
+  const remove = trpc.owner.deleteAnnouncement.useMutation({
+    onSuccess: () => {
+      toast.success("Announcement deleted");
+      utils.owner.announcements.invalidate({ venueId });
+      utils.announcements.list.invalidate();
+    },
+    onError: e => toast.error(e.message),
+  });
+
+  return (
+    <div className="mt-4">
+      <div className="flex items-center justify-between gap-2">
+        <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+          <Megaphone className="h-3 w-3" /> Announcements
+        </p>
+        <Dialog open={open} onOpenChange={setOpen}>
+          <DialogTrigger asChild>
+            <Button variant="outline" size="sm" className="press bg-transparent text-xs">
+              <Megaphone className="h-3.5 w-3.5 mr-1" /> Post notice
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Post a venue announcement</DialogTitle>
+              <DialogDescription>
+                Players will see this notice on the venue pages — e.g. court closures for a
+                party or special events.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3">
+              <Label className="block">
+                <span className="mb-1.5 block text-sm font-medium">Title *</span>
+                <Input
+                  className="bg-background"
+                  placeholder="Courts closed today — private event"
+                  value={title}
+                  onChange={e => setTitle(e.target.value)}
+                  maxLength={160}
+                />
+              </Label>
+              <Label className="block">
+                <span className="mb-1.5 block text-sm font-medium">Details *</span>
+                <textarea
+                  className="min-h-24 w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/40"
+                  placeholder="Tell players what's happening and until when…"
+                  value={message}
+                  onChange={e => setMessage(e.target.value)}
+                />
+              </Label>
+              <Label className="block">
+                <span className="mb-1.5 block text-sm font-medium">Expire (optional)</span>
+                <Input
+                  type="datetime-local"
+                  className="bg-background"
+                  value={expireAt}
+                  onChange={e => setExpireAt(e.target.value)}
+                />
+                <span className="mt-1 block text-[11px] text-muted-foreground">
+                  Leave empty to keep the notice visible indefinitely.
+                </span>
+              </Label>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" className="press bg-transparent" onClick={() => setOpen(false)}>Cancel</Button>
+              <Button
+                className="press"
+                disabled={create.isPending || !title.trim() || !message.trim()}
+                onClick={() =>
+                  create.mutate({
+                    venueId,
+                    title: title.trim(),
+                    message: message.trim(),
+                    expireAt: expireAt ? new Date(expireAt).toISOString() : null,
+                  })
+                }>
+                {create.isPending ? "Posting…" : "Post announcement"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+      <div className="mt-2 space-y-2">
+        {anns.data?.length ? (
+          anns.data.map(a => (
+            <div key={a.id} className="rounded-md border border-border bg-muted/30 px-3 py-2">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="truncate text-xs font-semibold">{a.title}</p>
+                  <p className="mt-0.5 line-clamp-2 text-[11px] text-muted-foreground">{a.message}</p>
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  <Badge variant={a.active === 1 ? "secondary" : "outline"} className="text-[9px]">
+                    {a.active === 1 ? "Live" : "Hidden"}
+                  </Badge>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 press bg-transparent"
+                    title={a.active === 1 ? "Hide announcement" : "Show announcement"}
+                    onClick={() =>
+                      toggle.mutate({ id: a.id, active: a.active === 1 ? 0 : 1 })
+                    }>
+                    <Megaphone className={`h-3.5 w-3.5 ${a.active === 1 ? "text-success" : "text-muted-foreground"}`} />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 press bg-transparent text-destructive"
+                    title="Delete announcement"
+                    onClick={() => remove.mutate({ id: a.id })}>
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ))
+        ) : (
+          !anns.isLoading && (
+            <p className="text-[11px] text-muted-foreground">No announcements yet.</p>
+          )
+        )}
+        {anns.isLoading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+      </div>
+    </div>
+  );
+}
+
 function StatCard({ label, value, accent }: { label: string; value: string | number; accent: string }) {
   return (
     <Card className="border-border bg-card">
@@ -548,6 +864,9 @@ function VenuePanel({ venueId }: { venueId: number }) {
             {tiers.isLoading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
           </div>
         </div>
+
+        {/* Announcements */}
+        <AnnouncementsSection venueId={venueId} />
       </CardContent>
     </Card>
   );

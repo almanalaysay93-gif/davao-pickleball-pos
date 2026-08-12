@@ -14,6 +14,7 @@ import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Clock, Search } fr
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useSearch } from "wouter";
 import { trpc } from "@/lib/trpc";
+import { AnnouncementsBanner } from "@/components/AnnouncementsBanner";
 
 type TimeFilter = "all" | "morning" | "afternoon" | "evening";
 
@@ -126,6 +127,13 @@ export default function Schedule() {
           reservation.
         </p>
       </div>
+
+      {/* Venue notices posted by owners */}
+      {venueId !== null && (
+        <div className="mt-6">
+          <AnnouncementsBanner venueId={venueId} />
+        </div>
+      )}
 
       {/* Filters */}
       <Card className="mt-8 border-border bg-card">

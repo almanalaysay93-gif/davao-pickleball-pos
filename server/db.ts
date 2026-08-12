@@ -1,8 +1,10 @@
 import { and, asc, desc, eq, gte, inArray, like, lte, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
+  announcements,
   bookings,
   courts,
+  InsertAnnouncement,
   InsertBooking,
   InsertRateTier,
   InsertUser,
@@ -357,4 +359,62 @@ export async function generateReference(): Promise<string> {
     if (attempts > 10) throw new Error("Failed to generate unique reference");
   } while ((await getBookingByReference(ref)) !== undefined);
   return ref;
+}
+
+/* ───────────── Announcements ───────────── */
+
+/** Active, non-expired announcements for public display, optionally scoped to specific venues. */
+export async function listActiveAnnouncements(venueIds?: number[]) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const now = new Date();
+  const conditions = [eq(announcements.active, 1), sql`${announcements.expireAt} IS NULL OR ${gte(announcements.expireAt, now)}`];
+  if (venueIds && venueIds.length > 0) {
+    conditions.push(inArray(announcements.venueId, venueIds));
+  }
+  return db.select().from(announcements).where(and(...conditions)).orderBy(desc(announcements.createdAt));
+}
+
+/** All announcements (incl. inactive/expired) scoped to a set of venue ids, for the owner UI. */
+export async function listVenueAnnouncements(venueIds: number[]) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  if (venueIds.length === 0) return [];
+  return db
+    .select()
+    .from(announcements)
+    .where(inArray(announcements.venueId, venueIds))
+    .orderBy(desc(announcements.createdAt))
+    .limit(200);
+}
+
+export async function createAnnouncement(input: InsertAnnouncement) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const result = await db.insert(announcements).values(input);
+  const id = (result as unknown as [{ insertId: number }])[0]?.insertId;
+  if (!id) {
+    // Fallback: fetch the row with the same title inserted last.
+    const rows = await db
+      .select()
+      .from(announcements)
+      .where(eq(announcements.title, input.title))
+      .orderBy(desc(announcements.id))
+      .limit(1);
+    return rows[0];
+  }
+  const rows = await db.select().from(announcements).where(eq(announcements.id, id)).limit(1);
+  return rows[0];
+}
+
+export async function updateAnnouncement(id: number, set: Partial<InsertAnnouncement>) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return db.update(announcements).set(set).where(eq(announcements.id, id));
+}
+
+export async function deleteAnnouncement(id: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return db.delete(announcements).where(eq(announcements.id, id));
 }

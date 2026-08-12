@@ -20,6 +20,7 @@ import {
 import { useState } from "react";
 import { Link } from "wouter";
 import { trpc } from "@/lib/trpc";
+import { AnnouncementsBanner } from "@/components/AnnouncementsBanner";
 
 export default function Courts() {
   const { data: venues, isLoading } = trpc.venues.list.useQuery(undefined, {
@@ -38,7 +39,10 @@ export default function Courts() {
 
   return (
     <div className="container py-10 md:py-14 fade-in">
-      <div className="max-w-2xl">
+      <div className="space-y-6">
+        <AnnouncementsBanner />
+      </div>
+      <div className="mt-6 max-w-2xl">
         <p className="text-xs font-semibold uppercase tracking-[0.22em] text-accent">
           Court directory
         </p>
