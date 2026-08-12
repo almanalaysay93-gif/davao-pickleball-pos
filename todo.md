@@ -82,3 +82,10 @@
 - [x] Owner portal: same court management for owned venues
 - [x] Vitest coverage for add/remove RBAC + booking conflict guard (28/28 passing)
 - [x] Typecheck + tests pass, checkpoint, deliver
+
+## Two-App Split (Customer + Owner)
+- [x] Audit current routes/layouts/links across all pages and shared layout
+- [x] Customer app: dedicated shell on main domain (Home, Courts, Schedule, Book, My Bookings, Confirmation) with customer-only nav; owner/admin links removed from customer nav
+- [x] Owner app: separate shell at /owner-app with its own branding/sign-in gate; owner nav isolated (Dashboard/Bookings/Announcements/System Admin); admin-only features stay in owner app
+- [x] /admin and /owner legacy routes redirect to owner app; admins auto-routed to System Admin console
+- [x] Tests pass (28/28), screenshots verify both shells, checkpoint, deliver

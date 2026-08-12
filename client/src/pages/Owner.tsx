@@ -38,10 +38,12 @@ import {
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
+import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 
 export default function Owner() {
   const { user, loading: authLoading } = useAuth();
+  const [location, navigate] = useLocation();
 
   if (authLoading) {
     return (
@@ -67,6 +69,19 @@ export default function Owner() {
             </Button>
           </CardContent>
         </Card>
+      </div>
+    );
+  }
+
+  if (user.role === "admin") {
+    // Admins manage the system from the System Admin console; the owner
+    // dashboard pages are scoped to venue owners (and their queries forbid
+    // admin access), so route admins straight there.
+    navigate("/owner-app/admin", { replace: true });
+    return (
+      <div className="container py-24 flex flex-col items-center gap-3">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        <p className="text-sm text-muted-foreground">Opening the admin console…</p>
       </div>
     );
   }
@@ -154,12 +169,26 @@ function OwnerDashboard() {
     );
   }, [bookings.data]);
 
+  const [location] = useLocation();
+
   if (venues.isLoading) {
     return (
       <div className="container py-24 flex flex-col items-center gap-3">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
       </div>
     );
+  }
+
+  // Separate owner app routes: /owner-app/bookings and /owner-app/announcements
+  // reuse the same data with focused sections, keeping the shell navigation in
+  // sync with what is rendered.
+  const venuesList = venues.data ?? [];
+
+  if (location === "/owner-app/bookings") {
+    return <OwnerBookingsSection venues={venuesList} bookings={bookings} markPaid={markPaid} cancel={cancel} />;
+  }
+  if (location === "/owner-app/announcements") {
+    return <OwnerAnnouncementsSection venues={venuesList} />;
   }
 
   if (!venues.data?.length) {
@@ -604,6 +633,169 @@ function OwnerWalkInDialog() {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+type BookingsQuery = {
+  data?: {
+    booking: {
+      id: number;
+      venueId: number;
+      courtId: number;
+      reference: string;
+      playerDate: string;
+      startHour: string;
+      endHour: string;
+      playerName: string;
+      channel: string;
+      totalAmount: string;
+      paymentStatus: string;
+    };
+    venue: { id: number; name: string; address: string } | null;
+  }[];
+  isLoading: boolean;
+};
+type MutationLike = { mutate: (input: { id: number }) => void };
+
+/** Focused bookings page (owner app): full reservations table with actions. */
+function OwnerBookingsSection({
+  venues,
+  bookings,
+  markPaid,
+  cancel,
+}: {
+  venues: { id: number; name: string; address: string }[];
+  bookings: BookingsQuery;
+  markPaid: MutationLike;
+  cancel: MutationLike;
+}) {
+  return (
+    <div className="container py-10 md:py-14 fade-in">
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-accent">
+            Owner portal
+          </p>
+          <h1 className="mt-3 text-3xl md:text-4xl font-semibold text-balance">Bookings</h1>
+        </div>
+        <div className="flex items-center gap-3">
+          <OwnerBookDialog />
+          <OwnerWalkInDialog />
+        </div>
+      </div>
+
+      <Card className="mt-8 border-border bg-card">
+        <CardContent className="p-0">
+          {bookings.isLoading ? (
+            <div className="p-10 flex justify-center">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : !bookings.data?.length ? (
+            <div className="p-10 text-center text-sm text-muted-foreground">
+              No reservations yet at your venue(s).
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Reference</TableHead>
+                    <TableHead>Venue</TableHead>
+                    <TableHead>Court</TableHead>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Time</TableHead>
+                    <TableHead>Player</TableHead>
+                    <TableHead>Channel</TableHead>
+                    <TableHead>Amount</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(bookings.data ?? []).map(({ booking, venue }) => (
+                    <TableRow key={booking.id}>
+                      <TableCell className="font-mono text-xs font-semibold">
+                        {booking.reference}
+                      </TableCell>
+                      <TableCell>{venue?.name ?? `#${booking.venueId}`}</TableCell>
+                      <TableCell>Court {booking.courtId}</TableCell>
+                      <TableCell>{booking.playerDate}</TableCell>
+                      <TableCell className="whitespace-nowrap">
+                        {formatHour(booking.startHour)} – {formatHour(booking.endHour)}
+                      </TableCell>
+                      <TableCell>
+                        <div className="max-w-36 truncate">{booking.playerName}</div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={booking.channel === "walkin" ? "secondary" : "outline"} className="text-[10px]">
+                          {booking.channel}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="font-medium">
+                        {formatPHP(Number(booking.totalAmount))}
+                      </TableCell>
+                      <TableCell>
+                        <StatusBadge status={booking.paymentStatus} />
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex justify-end gap-1.5">
+                          {booking.paymentStatus === "pending" && (
+                            <PayDialog
+                              bookingId={booking.id}
+                              onDone={() => markPaid.mutate({ id: booking.id })}
+                            />
+                          )}
+                          {booking.paymentStatus !== "cancelled" && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 press text-destructive bg-transparent hover:bg-destructive/10"
+                              title="Cancel booking"
+                              onClick={() => cancel.mutate({ id: booking.id })}>
+                              <BadgeX className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+/** Focused announcements page (owner app): one announcements panel per venue. */
+function OwnerAnnouncementsSection({
+  venues,
+}: {
+  venues: { id: number; name: string; address: string }[];
+}) {
+  return (
+    <div className="container py-10 md:py-14 fade-in">
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-[0.22em] text-accent">
+          Owner portal
+        </p>
+        <h1 className="mt-3 text-3xl md:text-4xl font-semibold text-balance">Announcements</h1>
+        <p className="mt-3 text-sm text-muted-foreground max-w-xl">
+          Post notices about court closures, private events, or special activities. Players see
+          active notices on the venue pages.
+        </p>
+      </div>
+      <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {venues.map(v => (
+          <Card key={v.id} className="border-border bg-card p-6">
+            <h3 className="font-display text-lg font-semibold">{v.name}</h3>
+            <AnnouncementsSection venueId={v.id} />
+          </Card>
+        ))}
+      </div>
+    </div>
   );
 }
 
