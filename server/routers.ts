@@ -15,10 +15,29 @@ import {
   type AppUser,
 } from "./auth";
 
+/** Stricter gate: only the global master owner (session with no venueId) may pass.
+ *  Session-based owners (type 'owner') with venueId == null own all venues;
+ *  venue-bound owners carry a venueId in their session; legacy OAuth-based
+ *  owners (type 'customer') are never system admins here. */
+const globalAdminProcedure = publicProcedure.use(({ ctx, next }) => {
+  const user = ctx.user as (AppUser & { venueId?: number | null }) | undefined;
+  const sessionVenueId = user?.venueId;
+  const ownsAllVenues = user?.type === "owner" && sessionVenueId == null;
+  if (!ownsAllVenues) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Master admin access required" });
+  }
+  return next({ ctx });
+});
+
 let pool: mysql.Pool | null = null;
 function getAuthPool(): mysql.Pool {
   if (!pool && process.env.DATABASE_URL) pool = mysql.createPool(process.env.DATABASE_URL);
   return pool!;
+}
+
+/** Test accessor for the auth pool (used by vitest suites). */
+export function getAuthPoolForTests(): mysql.Pool {
+  return getAuthPool();
 }
 
 const adminProcedure = publicProcedure.use(({ ctx, next }) => {
@@ -699,6 +718,115 @@ export const appRouter = router({
 
     /** Admin-only: list all venue ownership assignments. */
     owners: adminProcedure.query(async () => db.listAllOwners()),
+
+    /** Admin-only (global master only): list all owner credential accounts. */
+    ownerAccounts: globalAdminProcedure.query(async () => {
+      const [rows] = await getAuthPool().query(
+        "SELECT id, username, venueId, createdAt FROM ownerCredentials ORDER BY id ASC",
+      );
+      const list = (rows as any[]).map((r) => ({
+        id: Number(r.id),
+        username: String(r.username),
+        venueId: r.venueId != null ? Number(r.venueId) : null,
+        createdAt: new Date(r.createdAt),
+      }));
+      // Attach venue names for display.
+      const venues = await db.listVenues();
+      return { accounts: list, venues: venues ?? [] } as const;
+    }),
+
+    /** Admin-only (global master only): create a new venue owner login. */
+    createOwnerAccount: globalAdminProcedure
+      .input(
+        z.object({
+          username: z.string().trim().min(1).max(64),
+          password: z.string().min(8).max(128),
+          venueId: z.number().int().positive().nullish(),
+        }),
+      )
+      .mutation(async ({ input }) => {
+        const username = input.username.toLowerCase();
+        if (username === "owner") {
+          throw new TRPCError({ code: "CONFLICT", message: "This username is reserved for the master admin account" });
+        }
+        const [existing] = await getAuthPool().query(
+          "SELECT id FROM ownerCredentials WHERE username = ? LIMIT 1",
+          [username],
+        );
+        if ((existing as any[]).length > 0) {
+          throw new TRPCError({ code: "CONFLICT", message: "An owner account with this username already exists" });
+        }
+        if (input.venueId != null) {
+          const venue = await db.getVenueById(input.venueId);
+          if (!venue) throw new TRPCError({ code: "NOT_FOUND", message: "Venue not found" });
+        }
+        const hash = await hashPassword(input.password);
+        const [res] = await getAuthPool().query(
+          "INSERT INTO ownerCredentials (username, passwordHash, venueId) VALUES (?, ?, ?)",
+          [username, hash, input.venueId ?? null],
+        );
+        return { success: true, id: (res as any).insertId } as const;
+      }),
+
+    /** Admin-only (global master only): change an owner account's password. */
+    setOwnerAccountPassword: globalAdminProcedure
+      .input(z.object({ id: z.number().int().positive(), password: z.string().min(8).max(128) }))
+      .mutation(async ({ input }) => {
+        const [existing] = await getAuthPool().query(
+          "SELECT id FROM ownerCredentials WHERE id = ? LIMIT 1",
+          [input.id],
+        );
+        if ((existing as any[]).length === 0) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Owner account not found" });
+        }
+        const hash = await hashPassword(input.password);
+        await getAuthPool().query("UPDATE ownerCredentials SET passwordHash = ? WHERE id = ?", [
+          hash,
+          input.id,
+        ]);
+        return { success: true } as const;
+      }),
+
+    /** Admin-only (global master only): reassign which venue an owner account manages. */
+    setOwnerAccountVenue: globalAdminProcedure
+      .input(z.object({ id: z.number().int().positive(), venueId: z.number().int().positive().nullish() }))
+      .mutation(async ({ input }) => {
+        const [existing] = await getAuthPool().query(
+          "SELECT id, username FROM ownerCredentials WHERE id = ? LIMIT 1",
+          [input.id],
+        );
+        const row = (existing as any[])[0];
+        if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Owner account not found" });
+        if (String(row.username).toLowerCase() === "owner" && input.venueId != null) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "The master admin account cannot be bound to a single venue" });
+        }
+        if (input.venueId != null) {
+          const venue = await db.getVenueById(input.venueId);
+          if (!venue) throw new TRPCError({ code: "NOT_FOUND", message: "Venue not found" });
+        }
+        await getAuthPool().query("UPDATE ownerCredentials SET venueId = ? WHERE id = ?", [
+          input.venueId ?? null,
+          input.id,
+        ]);
+        return { success: true } as const;
+      }),
+
+    /** Admin-only (global master only): delete an owner account (cannot delete the master admin account). */
+    deleteOwnerAccount: globalAdminProcedure
+      .input(z.object({ id: z.number().int().positive() }))
+      .mutation(async ({ input }) => {
+        const [existing] = await getAuthPool().query(
+          "SELECT id, username FROM ownerCredentials WHERE id = ? LIMIT 1",
+          [input.id],
+        );
+        const row = (existing as any[])[0];
+        if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Owner account not found" });
+        if (String(row.username).toLowerCase() === "owner") {
+          throw new TRPCError({ code: "FORBIDDEN", message: "The master admin account cannot be deleted" });
+        }
+        await getAuthPool().query("DELETE FROM ownerCredentials WHERE id = ?", [input.id]);
+        return { success: true } as const;
+      }),
   }),
 });
 

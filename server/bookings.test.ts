@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { appRouter } from "./routers";
+import { appRouter, getAuthPoolForTests } from "./routers";
 import type { TrpcContext } from "./_core/context";
 import { announcements as announcementsTable, bookings as bookingsTable, courts as courtsTable, venueOwners, customerAccounts } from "../drizzle/schema";
 import { and, desc, eq, sql } from "drizzle-orm";
@@ -1243,6 +1243,146 @@ describe("per-venue owner logins", () => {
     const caller = appRouter.createCaller(guestCtx());
     await expect(
       caller.auth.ownerLogin({ username: "Nonexistent Court", password: "x" }),
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+});
+
+describe("admin.ownerAccounts — master control of owner logins", () => {
+  let masterId: number | null = null;
+
+  beforeEach(async () => {
+    // Ensure the global master account exists (seeded) before running.
+    const [rows] = await getAuthPoolForTests().query(
+      "SELECT id FROM ownerCredentials WHERE username = 'owner' LIMIT 1",
+    );
+    masterId = (rows as any[])[0]?.id ?? null;
+  });
+
+  afterEach(async () => {
+    if (masterId !== null) {
+      await getAuthPoolForTests().query("DELETE FROM ownerCredentials WHERE username LIKE 'test-owner-%'");
+    }
+  });
+
+  it("lists owner accounts for the global master admin", async () => {
+    const caller = appRouter.createCaller(adminCtx());
+    const res = await caller.admin.ownerAccounts();
+    const names = res.accounts.map(a => a.username);
+    expect(names).toContain("owner");
+    expect(res.venues.length).toBeGreaterThan(0);
+  });
+
+  it("denies owner account management to venue-bound owners", async () => {
+    const caller = appRouter.createCaller(
+      baseCtx({
+        id: 501,
+        type: "owner",
+        identity: "crisron-owner",
+        name: "CrisRon Owner",
+        email: null,
+        role: "owner",
+        venueId: 5,
+      } as AuthenticatedUser),
+    );
+    await expect(caller.admin.ownerAccounts()).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("denies owner account management to players/guests", async () => {
+    const ownerCaller = appRouter.createCaller(ownerCtx());
+    await expect(ownerCaller.admin.ownerAccounts()).rejects.toMatchObject({ code: "FORBIDDEN" });
+    const guestCaller = appRouter.createCaller(guestCtx());
+    await expect(guestCaller.admin.ownerAccounts()).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("creates a venue-bound owner account and verifies login works", async () => {
+    const caller = appRouter.createCaller(adminCtx());
+    const created = await caller.admin.createOwnerAccount({
+      username: "Test-Owner-Alpha",
+      password: "StrongPass1!",
+      venueId: 5,
+    });
+    expect(created.success).toBe(true);
+
+    // The new account signs in as CrisRon venue owner.
+    await caller.auth.ownerLogin({ username: "test-owner-alpha", password: "StrongPass1!" });
+    // Verify payload: login must succeed without throwing.
+    const [rows] = await getAuthPoolForTests().query(
+      "SELECT username, venueId FROM ownerCredentials WHERE username = 'test-owner-alpha' LIMIT 1",
+    );
+    const row = (rows as any[])[0];
+    expect(row.venueId).toBe(5);
+  });
+
+  it("rejects duplicate usernames and the reserved master name", async () => {
+    const caller = appRouter.createCaller(adminCtx());
+    await caller.admin.createOwnerAccount({ username: "Test-Owner-Dup", password: "StrongPass2!" });
+    await expect(
+      caller.admin.createOwnerAccount({ username: "test-owner-dup", password: "StrongPass2!" }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(
+      caller.admin.createOwnerAccount({ username: "owner", password: "StrongPass2!" }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+
+  it("changes a password and allows login with the new one", async () => {
+    const caller = appRouter.createCaller(adminCtx());
+    await caller.admin.createOwnerAccount({ username: "Test-Owner-Pw", password: "Original1!" });
+    const [rows] = await getAuthPoolForTests().query(
+      "SELECT id FROM ownerCredentials WHERE username = 'test-owner-pw' LIMIT 1",
+    );
+    const id = (rows as any[])[0].id;
+    await caller.admin.setOwnerAccountPassword({ id, password: "Updated2!" });
+    // New password signs in; old one no longer does.
+    await caller.auth.ownerLogin({ username: "test-owner-pw", password: "Updated2!" });
+    await expect(
+      caller.auth.ownerLogin({ username: "test-owner-pw", password: "Original1!" }),
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+
+  it("rejects too-short passwords", async () => {
+    const caller = appRouter.createCaller(adminCtx());
+    await expect(
+      caller.admin.createOwnerAccount({ username: "Test-Owner-Short", password: "Ab1" }),
+    ).rejects.toThrow();
+  });
+
+  it("reassigns scope and promotes a venue owner to global", async () => {
+    const caller = appRouter.createCaller(adminCtx());
+    await caller.admin.createOwnerAccount({ username: "Test-Owner-Scope", password: "StrongPass3!" });
+    const [rows] = await getAuthPoolForTests().query(
+      "SELECT id FROM ownerCredentials WHERE username = 'test-owner-scope' LIMIT 1",
+    );
+    const id = (rows as any[])[0].id;
+    await caller.admin.setOwnerAccountVenue({ id, venueId: 2 });
+    await caller.admin.setOwnerAccountVenue({ id, venueId: null });
+    const [after] = await getAuthPoolForTests().query(
+      "SELECT venueId FROM ownerCredentials WHERE id = ? LIMIT 1",
+      [id],
+    );
+    expect((after as any[])[0].venueId).toBeNull();
+  });
+
+  it("cannot bind or delete the master admin account", async () => {
+    expect(masterId).not.toBeNull();
+    const caller = appRouter.createCaller(adminCtx());
+    await expect(
+      caller.admin.setOwnerAccountVenue({ id: masterId!, venueId: 1 }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(caller.admin.deleteOwnerAccount({ id: masterId! })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+  });
+
+  it("deletes a venue owner account and revokes login", async () => {
+    const caller = appRouter.createCaller(adminCtx());
+    await caller.admin.createOwnerAccount({ username: "Test-Owner-Del", password: "StrongPass4!" });
+    const [rows] = await getAuthPoolForTests().query(
+      "SELECT id FROM ownerCredentials WHERE username = 'test-owner-del' LIMIT 1",
+    );
+    const id = (rows as any[])[0].id;
+    await caller.admin.deleteOwnerAccount({ id });
+    await expect(
+      caller.auth.ownerLogin({ username: "test-owner-del", password: "StrongPass4!" }),
     ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
   });
 });

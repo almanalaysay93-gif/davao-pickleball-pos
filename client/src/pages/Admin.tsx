@@ -226,6 +226,7 @@ function AdminDashboard() {
       </Card>
 
       <CourtStatusCard />
+      <OwnerAccountsCard />
       <OwnershipCard />
     </div>
   );
@@ -561,6 +562,419 @@ function OwnershipCard() {
         )}
       </CardContent>
     </Card>
+  );
+}
+
+function OwnerAccountsCard() {
+  const utils = trpc.useUtils();
+  const { data, isLoading } = trpc.admin.ownerAccounts.useQuery(undefined, {
+    refetchOnWindowFocus: false,
+  });
+  const accounts = data?.accounts ?? [];
+  const venues = data?.venues ?? [];
+
+  const setPassword = trpc.admin.setOwnerAccountPassword.useMutation({
+    onSuccess: () => {
+      toast.success("Password updated — the owner will need to sign in again with the new password");
+      utils.admin.ownerAccounts.invalidate();
+    },
+    onError: e => toast.error(e.message),
+  });
+  const setVenue = trpc.admin.setOwnerAccountVenue.useMutation({
+    onSuccess: () => {
+      toast.success("Owner scope updated");
+      utils.admin.ownerAccounts.invalidate();
+    },
+    onError: e => toast.error(e.message),
+  });
+  const deleteAccount = trpc.admin.deleteOwnerAccount.useMutation({
+    onSuccess: () => {
+      toast.success("Owner account removed — that login no longer works");
+      utils.admin.ownerAccounts.invalidate();
+    },
+    onError: e => toast.error(e.message),
+  });
+
+  return (
+    <Card className="mt-6 border-border bg-card">
+      <CardContent className="p-6">
+        <div className="flex items-start justify-between flex-wrap gap-3">
+          <div>
+            <h3 className="font-display text-lg font-semibold flex items-center gap-2">
+              <KeyRound className="h-5 w-5 text-accent" /> Owner login accounts
+            </h3>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Create and control the username/password logins for venue owners. Create an
+              account, hand the credentials to the venue owner, and change or revoke them
+              anytime.
+            </p>
+          </div>
+          <CreateOwnerAccountDialog venues={venues} />
+        </div>
+
+        {isLoading ? (
+          <div className="mt-4 flex justify-center">
+            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          </div>
+        ) : !accounts.length ? (
+          <p className="mt-4 text-sm text-muted-foreground">No owner login accounts yet.</p>
+        ) : (
+          <div className="mt-4 overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Username</TableHead>
+                  <TableHead>Manages</TableHead>
+                  <TableHead>Created</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {accounts.map(row => {
+                  const venue = row.venueId ? venues.find(v => v.id === row.venueId) : null;
+                  const isMaster = row.username.toLowerCase() === "owner";
+                  return (
+                    <TableRow key={row.id}>
+                      <TableCell className="font-mono text-xs font-semibold">
+                        {row.username}
+                        {isMaster && (
+                          <Badge className="ml-2 bg-accent/15 text-accent border-0">master admin</Badge>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {isMaster ? (
+                          <span className="text-xs text-muted-foreground">All venues (system-wide)</span>
+                        ) : venue ? (
+                          venue.name
+                        ) : (
+                          <span className="text-xs text-muted-foreground">— no venue (global)</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {new Date(row.createdAt).toLocaleDateString("en-US", {
+                          year: "numeric",
+                          month: "short",
+                          day: "numeric",
+                        })}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex justify-end gap-1.5">
+                          {isMaster ? (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="press bg-transparent"
+                              onClick={() =>
+                                toast("The master admin password can only be changed by Manus support")
+                              }>
+                              <KeyRound className="h-4 w-4 mr-1.5" /> Locked
+                            </Button>
+                          ) : (
+                            <>
+                              <PasswordDialog
+                                accountId={row.id}
+                                username={row.username}
+                                onDone={pw => setPassword.mutate({ id: row.id, password: pw })}
+                              />
+                              <VenueDialog
+                                accountId={row.id}
+                                currentVenueId={row.venueId}
+                                venues={venues}
+                                onDone={venueId => setVenue.mutate({ id: row.id, venueId })}
+                              />
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 press bg-transparent text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                                title="Delete owner account"
+                                disabled={deleteAccount.isPending}
+                                onClick={() => {
+                                  if (
+                                    window.confirm(
+                                      `Delete the login account "${row.username}"? They will no longer be able to sign in. Their venue's data stays intact.`,
+                                    )
+                                  ) {
+                                    deleteAccount.mutate({ id: row.id });
+                                  }
+                                }}>
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function PasswordDialog({
+  accountId,
+  username,
+  onDone,
+}: {
+  accountId: number;
+  username: string;
+  onDone: (password: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [pw, setPw] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const mismatch = open && pw.length >= 8 && pw !== confirm;
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={o => {
+        setOpen(o);
+        if (!o) {
+          setPw("");
+          setConfirm("");
+        }
+      }}>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm" className="press bg-transparent">
+          <KeyRound className="h-4 w-4 mr-1.5" /> Password
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Change password</DialogTitle>
+          <DialogDescription>Set a new sign-in password for "{username}".</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="space-y-1.5">
+            <Label>New password *</Label>
+            <Input
+              className="bg-background"
+              type="password"
+              placeholder="At least 8 characters"
+              value={pw}
+              onChange={e => setPw(e.target.value)}
+              maxLength={128}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Confirm password *</Label>
+            <Input
+              className="bg-background"
+              type="password"
+              placeholder="Repeat the new password"
+              value={confirm}
+              onChange={e => setConfirm(e.target.value)}
+              maxLength={128}
+            />
+            {mismatch && <p className="text-xs text-destructive">Passwords do not match</p>}
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" className="press bg-transparent" onClick={() => setOpen(false)}>
+            Cancel
+          </Button>
+          <Button
+            className="press"
+            disabled={pw.length < 8 || mismatch || confirm.length === 0}
+            onClick={() => {
+              onDone(pw);
+              setOpen(false);
+            }}>
+            Save password
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function VenueDialog({
+  accountId,
+  currentVenueId,
+  venues,
+  onDone,
+}: {
+  accountId: number;
+  currentVenueId: number | null;
+  venues: { id: number; name: string }[];
+  onDone: (venueId: number | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [venueId, setVenueId] = useState<string | null>(
+    currentVenueId !== null ? String(currentVenueId) : "none",
+  );
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={o => {
+        setOpen(o);
+        if (o) setVenueId(currentVenueId !== null ? String(currentVenueId) : "none");
+      }}>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm" className="press bg-transparent">
+          <DoorOpen className="h-4 w-4 mr-1.5" /> Venue
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Scope this owner</DialogTitle>
+          <DialogDescription>
+            Bind the owner to one venue, or leave them global to manage all venues.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-1.5">
+          <Label>Venue</Label>
+          <Select value={venueId ?? undefined} onValueChange={setVenueId}>
+            <SelectTrigger className="bg-background">
+              <SelectValue placeholder="Select venue" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">Global — manage all venues</SelectItem>
+              {venues.map(v => (
+                <SelectItem key={v.id} value={String(v.id)}>
+                  {v.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" className="press bg-transparent" onClick={() => setOpen(false)}>
+            Cancel
+          </Button>
+          <Button
+            className="press"
+            onClick={() => {
+              onDone(venueId === "none" ? null : Number(venueId));
+              setOpen(false);
+            }}>
+            Save scope
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function CreateOwnerAccountDialog({ venues }: { venues: { id: number; name: string }[] }) {
+  const utils = trpc.useUtils();
+  const [open, setOpen] = useState(false);
+  const [username, setUsername] = useState("");
+  const [pw, setPw] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [venueId, setVenueId] = useState<string>("none");
+
+  const create = trpc.admin.createOwnerAccount.useMutation({
+    onSuccess: () => {
+      toast.success(
+        `Owner account created. Sign-in: "${username}" / the password you set.`,
+        { duration: 8000 },
+      );
+      setOpen(false);
+      setUsername("");
+      setPw("");
+      setConfirm("");
+      setVenueId("none");
+      utils.admin.ownerAccounts.invalidate();
+    },
+    onError: e => toast.error(e.message),
+  });
+
+  const mismatch = pw.length >= 8 && pw !== confirm;
+  const canSubmit = username.trim().length > 0 && !mismatch && pw.length >= 8 && confirm.length >= 8;
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm" className="press bg-transparent">
+          <UserPlus className="h-4 w-4 mr-1.5" /> Create owner account
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Create owner login</DialogTitle>
+          <DialogDescription>
+            Create a username/password login for a venue owner. The username becomes their
+            sign-in name — the venue's exact name keeps things easy.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="space-y-1.5">
+            <Label>Username *</Label>
+            <Input
+              className="bg-background"
+              placeholder="e.g. CrisRon"
+              value={username}
+              onChange={e => setUsername(e.target.value)}
+              maxLength={64}
+            />
+            <p className="text-xs text-muted-foreground">
+              Use the venue's exact name as the username so owners find it easily.
+            </p>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Password *</Label>
+            <Input
+              className="bg-background"
+              type="password"
+              placeholder="At least 8 characters"
+              value={pw}
+              onChange={e => setPw(e.target.value)}
+              maxLength={128}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Confirm password *</Label>
+            <Input
+              className="bg-background"
+              type="password"
+              placeholder="Repeat the password"
+              value={confirm}
+              onChange={e => setConfirm(e.target.value)}
+              maxLength={128}
+            />
+            {mismatch && <p className="text-xs text-destructive">Passwords do not match</p>}
+          </div>
+          <div className="space-y-1.5">
+            <Label>Scope</Label>
+            <Select value={venueId} onValueChange={setVenueId}>
+              <SelectTrigger className="bg-background">
+                <SelectValue placeholder="Select scope" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">Global — manage all venues</SelectItem>
+                {venues.map(v => (
+                  <SelectItem key={v.id} value={String(v.id)}>
+                    {v.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" className="press bg-transparent" onClick={() => setOpen(false)}>
+            Cancel
+          </Button>
+          <Button
+            className="press"
+            disabled={!canSubmit || create.isPending}
+            onClick={() =>
+              create.mutate({
+                username: username.trim(),
+                password: pw,
+                venueId: venueId === "none" ? null : Number(venueId),
+              })
+            }>
+            {create.isPending ? "Creating…" : "Create account"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

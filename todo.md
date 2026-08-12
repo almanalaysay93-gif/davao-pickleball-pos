@@ -117,3 +117,9 @@
 - [x] Vitest coverage: venue login scoping + cross-venue isolation (45/45 passing)
 - [x] Bug fix: added cookie-parser middleware (session cookies were never read — auth.me returned null after login) and updated UI login quick-select for all 8 venues (45/45 passing)
 - [x] Typecheck, tests, checkpoint, deliver with per-venue credentials list
+
+## Master Admin Control of Owner Accounts
+- [ ] Backend: admin procedures to list/create/update-password/revoke owner credential rows (global owner only)
+- [ ] UI: "Owner Accounts" panel in System Admin console (create owner, set/change password, assign venue, delete)
+- [ ] Vitest coverage for owner account management RBAC
+- [ ] Typecheck, tests, checkpoint, deliver admin credentials + instructions
