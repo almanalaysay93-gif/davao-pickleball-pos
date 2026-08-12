@@ -13,6 +13,8 @@ import Book from "./pages/Book";
 import Checkout from "./pages/Checkout";
 import Confirmation from "./pages/Confirmation";
 import Admin from "./pages/Admin";
+import MyBookings from "./pages/MyBookings";
+import Owner from "./pages/Owner";
 
 function Router() {
   return (
@@ -24,6 +26,8 @@ function Router() {
       <Route path={"/checkout"} component={Checkout} />
       <Route path={"/confirmation/:reference"} component={Confirmation} />
       <Route path={"/admin"} component={Admin} />
+      <Route path={"/my-bookings"} component={MyBookings} />
+      <Route path={"/owner"} component={Owner} />
       <Route path={"/404"} component={NotFound} />
       {/* Final fallback route */}
       <Route component={NotFound} />

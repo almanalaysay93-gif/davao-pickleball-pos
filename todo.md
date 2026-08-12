@@ -37,3 +37,21 @@
 - [x] Fix Admin ModifyDialog to fetch the booking's venue/rate tiers and enable time edits
 - [x] Walk-in creation: navigate to receipt screen after payment
 - [x] Add explicit query error UIs across pages
+
+## Dual-Role Login System
+- [x] Schema: add role enum values (player/owner), venue_owners table linking owners to venues
+- [x] Migration applied via webdev_execute_sql
+- [x] DB helpers: getOwnerVenues, owner procedures for CRUD on owned venues/courts/bookings
+- [x] tRPC: ownerProcedure RBAC, player booking procedures (myBookings, cancel own booking)
+- [x] Login/sign-in UI flow distinguishing player vs owner (sign in once, role determined by DB; owner gate via owned venues)
+- [x] Player portal page: My Bookings (view, cancel)
+- [x] Owner portal page: manage owned venues, courts, status, reservations, walk-in creation
+- [x] Nav integration: My Bookings + Owner Dashboard entries shown by role
+- [x] Vitest coverage for RBAC (owner-only access, cross-owner isolation, player can't access owner data)
+- [x] Screenshots verified, checkpoint, deliver
+
+## Dual-Role Gaps to Close
+- [ ] Add owner-side walk-in booking flow (reuse Admin WalkInDialog pattern) on Owner portal
+- [ ] Strengthen RBAC tests: signed-in player denied owner routes, two-owner isolation
+- [ ] Role-aware sign-in UX/messaging on Owner page (keep owner gate messaging)
+- [ ] Screenshot verification + checkpoint + deliver

@@ -2,7 +2,7 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { startLogin } from "@/const";
-import { CalendarDays, CircleDot, LayoutGrid, Lock, MapPin, Menu, Receipt, X } from "lucide-react";
+import { CalendarDays, CircleDot, KeyRound, LayoutGrid, Lock, MapPin, Menu, Receipt, UserRound, X } from "lucide-react";
 import { ReactNode, useState } from "react";
 import { Link, useLocation } from "wouter";
 
@@ -18,6 +18,7 @@ export default function SiteLayout({ children }: { children: ReactNode }) {
   const [location] = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
   const isAdmin = user?.role === "admin";
+  const isOwner = user?.role === "owner";
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -51,6 +52,19 @@ export default function SiteLayout({ children }: { children: ReactNode }) {
                 {l.label}
               </Link>
             ))}
+            {isOwner && (
+              <Link
+                href="/owner"
+                className={cn(
+                  "px-3.5 py-2 rounded-md text-sm font-medium transition-colors duration-150 flex items-center gap-1.5",
+                  location === "/owner"
+                    ? "bg-primary text-primary-foreground"
+                    : "text-foreground/75 hover:bg-secondary hover:text-secondary-foreground",
+                )}>
+                <KeyRound className="h-3.5 w-3.5" />
+                Owner
+              </Link>
+            )}
             {isAdmin && (
               <Link
                 href="/admin"
@@ -98,6 +112,15 @@ export default function SiteLayout({ children }: { children: ReactNode }) {
                 {l.label}
               </Link>
             ))}
+            {isOwner && (
+              <Link
+                href="/owner"
+                onClick={() => setMobileOpen(false)}
+                className="px-3 py-2.5 rounded-md text-sm font-medium flex items-center gap-2 text-foreground/75 hover:bg-secondary">
+                <KeyRound className="h-4 w-4" />
+                Owner Dashboard
+              </Link>
+            )}
             {isAdmin && (
               <Link
                 href="/admin"
@@ -105,6 +128,15 @@ export default function SiteLayout({ children }: { children: ReactNode }) {
                 className="px-3 py-2.5 rounded-md text-sm font-medium flex items-center gap-2 text-foreground/75 hover:bg-secondary">
                 <Receipt className="h-4 w-4" />
                 Admin Dashboard
+              </Link>
+            )}
+            {user && (
+              <Link
+                href="/my-bookings"
+                onClick={() => setMobileOpen(false)}
+                className="px-3 py-2.5 rounded-md text-sm font-medium flex items-center gap-2 text-foreground/75 hover:bg-secondary">
+                <UserRound className="h-4 w-4" />
+                My Bookings
               </Link>
             )}
             {!user && (
@@ -140,6 +172,12 @@ export default function SiteLayout({ children }: { children: ReactNode }) {
               <li><Link href="/courts" className="hover:text-primary transition-colors">Court Directory</Link></li>
               <li><Link href="/schedule" className="hover:text-primary transition-colors">Schedule & Availability</Link></li>
               <li><Link href="/book" className="hover:text-primary transition-colors">Book a Court</Link></li>
+              {user && (
+                <li><Link href="/my-bookings" className="hover:text-primary transition-colors">My Bookings</Link></li>
+              )}
+              {isOwner && (
+                <li><Link href="/owner" className="hover:text-primary transition-colors">Owner Dashboard</Link></li>
+              )}
               {isAdmin && (
                 <li><Link href="/admin" className="hover:text-primary transition-colors">Admin Dashboard</Link></li>
               )}

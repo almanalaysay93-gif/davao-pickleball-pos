@@ -9,7 +9,7 @@ export const users = mysqlTable("users", {
   name: text("name"),
   email: varchar("email", { length: 320 }),
   loginMethod: varchar("loginMethod", { length: 64 }),
-  role: mysqlEnum("role", ["user", "admin"]).default("user").notNull(),
+  role: mysqlEnum("role", ["user", "admin", "player", "owner"]).default("player").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
@@ -91,3 +91,17 @@ export const bookings = mysqlTable("bookings", {
 
 export type Booking = typeof bookings.$inferSelect;
 export type InsertBooking = typeof bookings.$inferInsert;
+
+/**
+ * Venue ownership: links a user (owner role) to the venues they manage.
+ * One owner can own multiple venues; one venue can have multiple owners.
+ */
+export const venueOwners = mysqlTable("venueOwners", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  venueId: int("venueId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type VenueOwner = typeof venueOwners.$inferSelect;
+export type InsertVenueOwner = typeof venueOwners.$inferInsert;

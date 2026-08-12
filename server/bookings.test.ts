@@ -1,6 +1,9 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { appRouter } from "./routers";
 import type { TrpcContext } from "./_core/context";
+import { bookings as bookingsTable, venueOwners } from "../drizzle/schema";
+import { and, eq, sql } from "drizzle-orm";
+import { getDb, getUserByEmail, upsertUser, listVenues } from "./db";
 
 // ---------------------------------------------------------------
 // Shared rate utilities
@@ -113,6 +116,22 @@ function guestCtx(): TrpcContext {
   return baseCtx(null);
 }
 
+let ownerCounter = 1;
+function ownerCtx(email?: string): TrpcContext {
+  const id = 100 + ownerCounter++;
+  return baseCtx({
+    id,
+    openId: `owner-${id}`,
+    email: email ?? `owner-${id}@example.com`,
+    name: `Owner ${id}`,
+    loginMethod: "manus",
+    role: "owner",
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    lastSignedIn: new Date(),
+  });
+}
+
 describe("venues.list", () => {
   it("returns the eight seeded Davao City venues", async () => {
     const caller = appRouter.createCaller(guestCtx());
@@ -168,13 +187,20 @@ describe("bookings.quote", () => {
 describe("bookings.create + conflict detection", () => {
   it("creates a booking and rejects a conflicting one", async () => {
     vi.useFakeTimers({ now: new Date("2026-09-01T12:00:00Z") });
-    const day = "2026-09-09"; // isolated date (admin tests use 2026-09-05)
+    const day = `2026-12-25`; // isolated future date
+    const rawDb = await getDb();
+    if (rawDb) await rawDb.delete(venueOwners).where(sql`1 = 1`).catch(() => undefined);
     try {
+      // Ensure the target court is unbooked at the start of this test.
       const caller = appRouter.createCaller(guestCtx());
       const venues = await caller.venues.list();
       const arena = venues.find(v => v.name === "Arena Athletics")!;
       const courts = await caller.courts.byVenue({ venueId: arena.id });
       const court = courts.find(c => c.status === "available")!;
+      const rawDb = await getDb();
+      if (rawDb) {
+        await rawDb.delete(bookingsTable).where(and(eq(bookingsTable.venueId, arena.id), eq(bookingsTable.courtId, court.id), eq(bookingsTable.playerDate, day)));
+      }
 
       const ref = await caller.bookings.create({
         venueId: arena.id,
@@ -215,6 +241,11 @@ describe("bookings.create + conflict detection", () => {
       expect(ref2.reference).toBeTruthy();
     } finally {
       vi.useRealTimers();
+      const rawDb = await getDb();
+      if (rawDb) {
+        await rawDb.delete(bookingsTable).where(eq(bookingsTable.playerDate, day)).catch(() => undefined);
+        await rawDb.delete(venueOwners).where(sql`1 = 1`).catch(() => undefined);
+      }
     }
   });
 
@@ -271,6 +302,13 @@ describe("admin authorization", () => {
       expect(after.find(b => b.id === target.id)?.paymentStatus).toBe("cancelled");
     } finally {
       vi.useRealTimers();
+      const rawDb = await getDb();
+      if (rawDb) {
+        await rawDb
+          .delete(bookingsTable)
+          .where(and(eq(bookingsTable.playerDate, "2026-09-05"), eq(bookingsTable.playerName, "Cancel Me")))
+          .catch(() => undefined);
+      }
     }
   });
 
@@ -294,5 +332,154 @@ describe("admin authorization", () => {
       }),
     );
     await expect(userCaller.bookings.cancel(adminInput)).rejects.toThrow(/admin access/i);
+  });
+});
+
+describe("dual-role: player & owner routers", () => {
+  it("denies guests from player/owner procedures", async () => {
+    const caller = appRouter.createCaller(guestCtx());
+    await expect(caller.bookings.myBookings({ identifier: "09123456789" })).rejects.toThrow();
+    await expect(caller.owner.myVenues()).rejects.toThrow();
+  });
+
+  it("denies a signed-in player from owner-only routes", async () => {
+    const playerCtx: TrpcContext = baseCtx({
+      id: 9999,
+      openId: "signed-in-player",
+      email: "player-signed-in@example.com",
+      name: "Player",
+      loginMethod: "manus",
+      role: "player",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      lastSignedIn: new Date(),
+    });
+    const caller = appRouter.createCaller(playerCtx);
+    await expect(caller.owner.myVenues()).rejects.toThrow();
+    await expect(caller.owner.courtsForVenue({ venueId: 1 })).rejects.toThrow();
+  });
+
+  it(
+    "isolates two owners: each sees only their own venue's bookings",
+    async () => {
+      vi.useFakeTimers({ now: new Date("2026-09-01T12:00:00Z") });
+    const day = "2026-12-24"; // isolated date (conflict test uses 2026-12-25)
+    const rawDb = await getDb();
+    if (rawDb) {
+      await rawDb.delete(bookingsTable).where(eq(bookingsTable.playerDate, day));
+      await rawDb.delete(venueOwners).where(sql`1 = 1`);
+    }
+    try {
+      const adminCaller = appRouter.createCaller(adminCtx());
+      const venueRows = await listVenues();
+      // Two venues, two owners.
+      const v1 = venueRows.find(v => v.name === "Arena Athletics")!;
+      const v2 = venueRows.find(v => v.name !== "Arena Athletics")!;
+      const email1 = `owner-a-${Date.now()}@example.com`;
+      const email2 = `owner-b-${Date.now()}@example.com`;
+      await upsertUser({ openId: `test-${email1}`, email: email1, role: "user" });
+      await upsertUser({ openId: `test-${email2}`, email: email2, role: "user" });
+      await adminCaller.admin.grantOwnership({ venueId: v1.id, email: email1 });
+      await adminCaller.admin.grantOwnership({ venueId: v2.id, email: email2 });
+
+      const u1 = await getUserByEmail(email1);
+      const u2 = await getUserByEmail(email2);
+
+      // Owner 2 books a court at venue 2 (their own venue).
+      const caller2 = appRouter.createCaller(
+        baseCtx({ ...u2!, openId: `o-${u2!.id}`, lastSignedIn: new Date() }),
+      );
+      const courts = await caller2.owner.courtsForVenue({ venueId: v2.id });
+      const court = courts.find(c => c.status === "available")!;
+      await caller2.bookings.create({
+        venueId: v2.id,
+        courtId: court.id,
+        playerDate: day,
+        startHour: "09:00",
+        endHour: "10:00",
+        playerName: "Owner Two Player",
+        channel: "online",
+      });
+
+      // Owner 1's bookings view must NOT include the booking at venue 2.
+      const caller1 = appRouter.createCaller(
+        baseCtx({ ...u1!, openId: `o-${u1!.id}`, lastSignedIn: new Date() }),
+      );
+      const b1 = await caller1.owner.bookings({});
+      // Owner 1 owns only venue 1, so bookings made at venue 2 must be invisible.
+      const seenVenues = new Set(b1.map(r => r.booking.venueId));
+      for (const vId of seenVenues) {
+        expect(vId).not.toBe(v2.id);
+      }
+      expect(b1.length).toBe(0);
+    } finally {
+      vi.useRealTimers();
+      const dbNow = await getDb();
+      if (dbNow) {
+        await dbNow.delete(bookingsTable).where(eq(bookingsTable.playerDate, day));
+        await dbNow.delete(venueOwners).where(sql`1 = 1`);
+      }
+    }
+  },
+  30000,
+);
+
+  it("denies owner-scoped actions when no venues are owned", async () => {
+    const caller = appRouter.createCaller(
+      ownerCtx("owner-no-venues@example.com"),
+    );
+    const venues = await caller.owner.myVenues();
+    expect(venues).toEqual([]);
+    await expect(caller.owner.courtsForVenue({ venueId: 1 })).rejects.toThrow(
+      /do not own/i,
+    );
+  });
+
+  it("assigns venue ownership via admin.grantOwnership and scopes owner access", async () => {
+    vi.useFakeTimers({ now: new Date("2026-09-01T12:00:00Z") });
+    const email = `owner-test-${Date.now()}@example.com`;
+    try {
+      // Seed the user record (as if they had signed in once).
+      await upsertUser({ openId: `test-${email}`, email, role: "user" });
+      const seeded = await getUserByEmail(email);
+      expect(seeded).toBeDefined();
+      // upsertUser resets lastSignedIn and may reset role to default "player";
+      // re-assert the user exists under the exact email the owner caller uses.
+      const confirmed = await getUserByEmail(email);
+      expect(confirmed).toBeDefined();
+
+      const adminCaller = appRouter.createCaller(adminCtx());
+      const venueRows = await listVenues();
+      const arena = venueRows.find(v => v.name === "Arena Athletics")!;
+
+      // Grant ownership to the seeded user, then construct an owner context
+      // whose id/email matches that same user record.
+      await adminCaller.admin.grantOwnership({ venueId: arena.id, email });
+      const seededAgain = await getUserByEmail(email);
+      const ownerCaller = appRouter.createCaller(
+        baseCtx({
+          ...seededAgain!,
+          openId: `owner-${seededAgain!.id}`,
+          lastSignedIn: new Date(),
+        }),
+      );
+      const owned = await ownerCaller.owner.myVenues();
+      expect(owned.map(v => v.id)).toContain(arena.id);
+
+      // Owner can read own venue's courts but not unowned ones
+      const courts = await ownerCaller.owner.courtsForVenue({ venueId: arena.id });
+      expect(courts.length).toBeGreaterThan(0);
+      const other = venueRows.find(v => v.id !== arena.id)!;
+      await expect(
+        ownerCaller.owner.courtsForVenue({ venueId: other.id }),
+      ).rejects.toThrow(/do not own/i);
+    } finally {
+      vi.useRealTimers();
+      // Cleanup
+      const rawDb = await getDb();
+      if (rawDb) {
+        await rawDb.delete(venueOwners).where(sql`1 = 1`);
+      }
+    }
   });
 });

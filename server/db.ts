@@ -1,13 +1,15 @@
-import { and, asc, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, like, lte, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   bookings,
   courts,
   InsertBooking,
+  InsertRateTier,
   InsertUser,
   rateTiers,
   users,
   venues,
+  venueOwners,
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
@@ -79,6 +81,13 @@ export async function upsertUser(user: InsertUser): Promise<void> {
     console.error("[Database] Failed to upsert user:", error);
     throw error;
   }
+}
+
+export async function getUserByEmail(email: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const rows = await db.select().from(users).where(eq(users.email, email.toLowerCase())).limit(1);
+  return rows[0];
 }
 
 export async function getUserByOpenId(openId: string) {
@@ -173,6 +182,7 @@ export async function getBookingById(id: number) {
 
 /** Check for conflicting booking on the same court + date + overlapping hours. */
 export async function findConflictingBooking(
+  venueId: number,
   courtId: number,
   playerDate: string,
   startHour: string,
@@ -186,6 +196,7 @@ export async function findConflictingBooking(
     .from(bookings)
     .where(
       and(
+        eq(bookings.venueId, venueId),
         eq(bookings.courtId, courtId),
         eq(bookings.playerDate, playerDate),
         inArray(bookings.paymentStatus, ["pending", "paid"]),
@@ -241,11 +252,96 @@ export function hhmmFromMinutes(mins: number): string {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
 
+export async function getCourtById(courtId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const rows = await db.select().from(courts).where(eq(courts.id, courtId)).limit(1);
+  return rows[0];
+}
+
+export async function listVenuesByIds(ids: number[]) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return db.select().from(venues).where(inArray(venues.id, ids)).orderBy(asc(venues.name));
+}
+
+export async function updateRateTier(tierId: number, patch: Pick<InsertRateTier, "pricePerHour">) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.update(rateTiers).set(patch).where(eq(rateTiers.id, tierId));
+}
+
 /** Update court operational status. */
 export async function setCourtStatus(courtId: number, status: "available" | "maintenance") {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
   await db.update(courts).set({ status }).where(eq(courts.id, courtId));
+}
+
+// ---------------- Player / Owner role helpers ----------------
+
+export async function listOwnerVenueIds(userId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const rows = await db.select().from(venueOwners).where(eq(venueOwners.userId, userId));
+  return rows.map(r => r.venueId);
+}
+
+export async function listOwnerVenues(userId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const ids = await listOwnerVenueIds(userId);
+  if (ids.length === 0) return [];
+  return db.select().from(venues).where(inArray(venues.id, ids)).orderBy(asc(venues.name));
+}
+
+export async function setRole(userId: number, role: "user" | "admin" | "player" | "owner") {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.update(users).set({ role }).where(eq(users.id, userId));
+}
+
+export async function grantVenueOwnership(userId: number, venueId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const existing = await db.select().from(venueOwners).where(and(eq(venueOwners.userId, userId), eq(venueOwners.venueId, venueId)));
+  if (existing.length > 0) return;
+  await db.insert(venueOwners).values({ userId, venueId });
+  await setRole(userId, "owner");
+}
+
+/** Bookings the player made (matched by contact or playerName against given text). */
+export async function listPlayerBookings(identifier: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const term = identifier.trim();
+  if (!term) return [];
+  return db
+    .select()
+    .from(bookings)
+    .where(
+      and(
+        inArray(bookings.paymentStatus, ["pending", "paid"]),
+        or(like(bookings.contact, `%${term}%`), like(bookings.playerName, `%${term}%`)),
+      ),
+    )
+    .orderBy(desc(bookings.createdAt))
+    .limit(200);
+}
+
+/** All bookings scoped to the venues an owner manages. */
+export async function listOwnerBookings(venueIds: number[], opts?: { channel?: "online" | "walkin"; limit?: number }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  if (venueIds.length === 0) return [];
+  const conditions = [inArray(bookings.venueId, venueIds), inArray(bookings.paymentStatus, ["pending", "paid"])];
+  if (opts?.channel) conditions.push(eq(bookings.channel, opts.channel));
+  return db
+    .select()
+    .from(bookings)
+    .where(and(...conditions))
+    .orderBy(desc(bookings.createdAt))
+    .limit(opts?.limit ?? 500);
 }
 
 /** Generate a unique reference like DV-PB-8A3K. */
