@@ -30,7 +30,7 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { Badge } from "@/components/ui/badge";
 import { startLogin } from "@/const";
 import { formatHour, formatPHP, priceSlot } from "@shared/rates";
-import { BadgeCheck, BadgeX, Clock, DoorOpen, Loader2, ReceiptText, Wrench, UserPlus, KeyRound } from "lucide-react";
+import { BadgeCheck, BadgeX, Clock, DoorOpen, Loader2, ReceiptText, Wrench, UserPlus, KeyRound, Plus, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
@@ -741,15 +741,29 @@ function CourtStatusCard() {
     onError: e => toast.error(e.message),
   });
 
+  const removeCourt = trpc.bookings.removeCourt.useMutation({
+    onSuccess: () => {
+      toast.success("Court removed");
+      utils.courts.byVenue.invalidate();
+      utils.venues.list.invalidate();
+    },
+    onError: e => toast.error(e.message),
+  });
+
   return (
     <Card className="mt-6 border-border bg-card">
       <CardContent className="p-6">
-        <h3 className="font-display text-lg font-semibold flex items-center gap-2">
-          <Wrench className="h-5 w-5 text-accent" /> Court operational status
-        </h3>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Mark a court as under maintenance to hide it from bookings.
-        </p>
+        <div className="flex items-start justify-between flex-wrap gap-3">
+          <div>
+            <h3 className="font-display text-lg font-semibold flex items-center gap-2">
+              <Wrench className="h-5 w-5 text-accent" /> Courts
+            </h3>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Toggle court status, add new courts, or remove courts that have no upcoming bookings.
+            </p>
+          </div>
+          <AddCourtDialog defaultVenue={selectedVenue ?? venues?.[0]?.id ?? null} venues={venues ?? []} />
+        </div>
         <div className="mt-4 flex flex-wrap gap-2">
           {venues?.map(v => (
             <Button
@@ -764,27 +778,125 @@ function CourtStatusCard() {
         </div>
         <div className="mt-4 flex flex-wrap gap-2.5">
           {courts.data?.map((c: { id: number; courtNumber: string; status: string }) => (
-            <Button
-              key={c.id}
-              variant="outline"
-              size="sm"
-              className={`press bg-transparent ${
-                c.status === "maintenance"
-                  ? "border-destructive/40 text-destructive hover:bg-destructive/10"
-                  : "border-success/40 text-success hover:bg-success/10"
-              }`}
-              onClick={() =>
-                setStatus.mutate({
-                  courtId: c.id,
-                  status: c.status === "available" ? "maintenance" : "available",
-                })
-              }>
-              {c.courtNumber}
-              {c.status === "maintenance" ? " · maintenance" : " · available"}
-            </Button>
+            <div key={c.id} className="flex items-center gap-1.5">
+              <Button
+                variant="outline"
+                size="sm"
+                className={`press bg-transparent ${
+                  c.status === "maintenance"
+                    ? "border-destructive/40 text-destructive hover:bg-destructive/10"
+                    : "border-success/40 text-success hover:bg-success/10"
+                }`}
+                onClick={() =>
+                  setStatus.mutate({
+                    courtId: c.id,
+                    status: c.status === "available" ? "maintenance" : "available",
+                  })
+                }>
+                {c.courtNumber}
+                {c.status === "maintenance" ? " · maintenance" : " · available"}
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 press bg-transparent text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                title="Remove court"
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      `Remove ${c.courtNumber}? Courts with upcoming bookings cannot be removed.`,
+                    )
+                  ) {
+                    removeCourt.mutate({ courtId: c.id });
+                  }
+                }}>
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </div>
           ))}
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function AddCourtDialog({ defaultVenue, venues }: { defaultVenue: number | null; venues: { id: number; name: string }[] }) {
+  const utils = trpc.useUtils();
+  const [open, setOpen] = useState(false);
+  const [courtNumber, setCourtNumber] = useState("");
+  const [venueId, setVenueId] = useState<number | null>(defaultVenue ?? null);
+
+  const create = trpc.bookings.createCourt.useMutation({
+    onSuccess: () => {
+      toast.success("Court added");
+      setCourtNumber("");
+      setOpen(false);
+      utils.courts.byVenue.invalidate();
+      utils.venues.list.invalidate();
+    },
+    onError: e => toast.error(e.message),
+  });
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={o => {
+        setOpen(o);
+        if (o) setVenueId(defaultVenue ?? null);
+      }}>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm" className="press bg-transparent">
+          <Plus className="h-4 w-4 mr-1.5" /> Add court
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Add a court</DialogTitle>
+          <DialogDescription>Add a new court to a venue, e.g. “Court 9”.</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-1.5">
+            <Label>Venue *</Label>
+            <Select
+              value={venueId !== null ? String(venueId) : undefined}
+              onValueChange={v => setVenueId(Number(v))}>
+              <SelectTrigger className="bg-background">
+                <SelectValue placeholder="Select venue" />
+              </SelectTrigger>
+              <SelectContent>
+                {venues.map(v => (
+                  <SelectItem key={v.id} value={String(v.id)}>
+                    {v.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Court label *</Label>
+            <Input
+              className="bg-background"
+              placeholder="Court 9"
+              value={courtNumber}
+              onChange={e => setCourtNumber(e.target.value)}
+              maxLength={16}
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" className="press bg-transparent" onClick={() => setOpen(false)}>
+            Cancel
+          </Button>
+          <Button
+            className="press"
+            disabled={create.isPending || !courtNumber.trim() || venueId === null}
+            onClick={() =>
+              create.mutate({ venueId: venueId!, courtNumber: courtNumber.trim() })
+            }>
+            {create.isPending ? "Adding…" : "Add court"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

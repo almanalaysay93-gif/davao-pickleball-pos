@@ -255,6 +255,31 @@ export const appRouter = router({
         return { success: true } as const;
       }),
 
+    /** Admin: add a new court to a venue. */
+    createCourt: adminProcedure
+      .input(
+        z.object({
+          venueId: z.number().int().positive(),
+          courtNumber: z.string().min(1).max(16).trim(),
+        }),
+      )
+      .mutation(async ({ input }) => {
+        const venue = await db.getVenueById(input.venueId);
+        if (!venue) throw new TRPCError({ code: "NOT_FOUND", message: "Venue not found" });
+        await db.addCourt(input.venueId, input.courtNumber);
+        return { success: true } as const;
+      }),
+
+    /** Admin: remove a court (only if it has no upcoming bookings). */
+    removeCourt: adminProcedure
+      .input(z.object({ courtId: z.number().int().positive() }))
+      .mutation(async ({ input }) => {
+        const court = await db.getCourtById(input.courtId);
+        if (!court) throw new TRPCError({ code: "NOT_FOUND", message: "Court not found" });
+        await db.removeCourt(input.courtId);
+        return { success: true } as const;
+      }),
+
     list: adminProcedure
       .input(
         z
@@ -356,6 +381,35 @@ export const appRouter = router({
           throw new TRPCError({ code: "FORBIDDEN", message: "You do not own this venue" });
         }
         await db.setCourtStatus(input.courtId, input.status);
+        return { success: true } as const;
+      }),
+
+    /** Owner: add a new court to an owned venue. */
+    createCourt: ownerProcedure
+      .input(
+        z.object({
+          venueId: z.number().int().positive(),
+          courtNumber: z.string().min(1).max(16).trim(),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        if (!ctx.ownedVenueIds.includes(input.venueId)) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "You do not own this venue" });
+        }
+        await db.addCourt(input.venueId, input.courtNumber);
+        return { success: true } as const;
+      }),
+
+    /** Owner: remove a court from an owned venue (only if no upcoming bookings). */
+    removeCourt: ownerProcedure
+      .input(z.object({ courtId: z.number().int().positive() }))
+      .mutation(async ({ input, ctx }) => {
+        const court = await db.getCourtById(input.courtId);
+        if (!court) throw new TRPCError({ code: "NOT_FOUND", message: "Court not found" });
+        if (!ctx.ownedVenueIds.includes(court.venueId)) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "You do not own this venue" });
+        }
+        await db.removeCourt(input.courtId);
         return { success: true } as const;
       }),
 

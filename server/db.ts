@@ -274,6 +274,38 @@ export async function updateRateTier(tierId: number, patch: Pick<InsertRateTier,
 }
 
 /** Update court operational status. */
+export async function addCourt(venueId: number, courtNumber: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const existing = await db.select().from(courts).where(and(eq(courts.venueId, venueId), eq(courts.courtNumber, courtNumber)));
+  if (existing.length > 0) throw new Error(`A court named "${courtNumber}" already exists at this venue`);
+  await db.insert(courts).values({ venueId, courtNumber });
+  return { success: true } as const;
+}
+
+export async function removeCourt(courtId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const court = await getCourtById(courtId);
+  if (!court) throw new Error("Court not found");
+  // Refuse if the court has bookings on today or any future date.
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const withBookings = await db
+    .select({ id: bookings.id })
+    .from(bookings)
+    .where(
+      and(
+        eq(bookings.courtId, courtId),
+        sql`${bookings.playerDate} >= ${today}`,
+        inArray(bookings.paymentStatus, ["pending", "paid"]),
+      ),
+    );
+  if (withBookings.length > 0) throw new Error("This court has upcoming bookings — cancel them first");
+  await db.delete(courts).where(eq(courts.id, courtId));
+  return { success: true } as const;
+}
+
 export async function setCourtStatus(courtId: number, status: "available" | "maintenance") {
   const db = await getDb();
   if (!db) throw new Error("Database not available");

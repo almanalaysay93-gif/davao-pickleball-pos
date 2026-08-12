@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { appRouter } from "./routers";
 import type { TrpcContext } from "./_core/context";
-import { announcements as announcementsTable, bookings as bookingsTable, venueOwners } from "../drizzle/schema";
+import { announcements as announcementsTable, bookings as bookingsTable, courts as courtsTable, venueOwners } from "../drizzle/schema";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { getDb, getUserByEmail, upsertUser, listVenues } from "./db";
 
@@ -114,6 +114,20 @@ function adminCtx(): TrpcContext {
 
 function guestCtx(): TrpcContext {
   return baseCtx(null);
+}
+
+function playerCtx(): TrpcContext {
+  return baseCtx({
+    id: 99,
+    openId: "player-user",
+    email: "player@example.com",
+    name: "Player",
+    loginMethod: "manus",
+    role: "player",
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    lastSignedIn: new Date(),
+  });
 }
 
 let ownerCounter = 1;
@@ -253,10 +267,13 @@ describe("bookings.create + conflict detection", () => {
     vi.useFakeTimers({ now: new Date("2026-09-01T12:00:00Z") });
     try {
       const caller = appRouter.createCaller(guestCtx());
+      const venuesList = await caller.venues.list();
+      const arenaVenue = venuesList.find(v => v.name === "Arena Athletics")!;
+      const courtList = await caller.courts.byVenue({ venueId: arenaVenue.id });
       await expect(
         caller.bookings.create({
-          venueId: 1,
-          courtId: 1,
+          venueId: arenaVenue.id,
+          courtId: courtList[0].id,
           playerDate: "2026-08-01",
           startHour: "10:00",
           endHour: "11:00",
@@ -718,4 +735,178 @@ describe("announcements & owner booking", () => {
       }
     }
   }, 60000);
+});
+
+describe(
+  "court add/remove",
+  () => {
+    it("admin can add and remove a court; player and guest cannot", async () => {
+    vi.useFakeTimers({ now: new Date("2026-09-01T12:00:00Z") });
+    const email = `court-test-${Date.now()}@example.com`;
+    try {
+      // Guest and player must be denied.
+      const guestCaller = appRouter.createCaller(guestCtx());
+      await expect(
+        guestCaller.bookings.createCourt({ venueId: 1, courtNumber: "Court 99" }),
+      ).rejects.toThrow();
+      await expect(
+        guestCaller.bookings.removeCourt({ courtId: 1 }),
+      ).rejects.toThrow();
+      const playerCaller = appRouter.createCaller(playerCtx());
+      await expect(
+        playerCaller.bookings.createCourt({ venueId: 1, courtNumber: "Court 99" }),
+      ).rejects.toThrow(/admin/i);
+
+      // Admin adds a court, then removes it.
+      const adminCaller = appRouter.createCaller(adminCtx());
+      const venueRows = await listVenues();
+      const arena = venueRows.find(v => v.name === "Arena Athletics")!;
+      const before = await adminCaller.courts.byVenue({ venueId: arena.id });
+      await adminCaller.bookings.createCourt({ venueId: arena.id, courtNumber: "Court 99" });
+      const afterAdd = await adminCaller.courts.byVenue({ venueId: arena.id });
+      expect(afterAdd.length).toBe(before.length + 1);
+      const added = afterAdd.find(c => c.courtNumber === "Court 99")!;
+
+      // Duplicate label is rejected.
+      await expect(
+        adminCaller.bookings.createCourt({ venueId: arena.id, courtNumber: "Court 99" }),
+      ).rejects.toThrow(/already exists/i);
+
+      await adminCaller.bookings.removeCourt({ courtId: added.id });
+      const afterRemove = await adminCaller.courts.byVenue({ venueId: arena.id });
+      expect(afterRemove.map(c => c.id)).not.toContain(added.id);
+    } finally {
+      vi.useRealTimers();
+      const rawDb = await getDb();
+      if (rawDb) await rawDb.delete(courtsTable).where(eq(courtsTable.courtNumber, "Court 99")).catch(() => undefined);
+    }
+  },
+  15000,
+);
+
+  it("owner can add/remove courts at owned venues only", async () => {
+    vi.useFakeTimers({ now: new Date("2026-09-01T12:00:00Z") });
+    const email = `owner-court-${Date.now()}@example.com`;
+    try {
+      await upsertUser({ openId: `test-${email}`, email, role: "user" });
+      const seeded = await getUserByEmail(email);
+      const adminCaller = appRouter.createCaller(adminCtx());
+      const venueRows = await listVenues();
+      const arena = venueRows.find(v => v.name === "Arena Athletics")!;
+      const other = venueRows.find(v => v.id !== arena.id)!;
+      await adminCaller.admin.grantOwnership({ venueId: arena.id, email });
+      const seededAgain = await getUserByEmail(email);
+      const ownerCaller = appRouter.createCaller(
+        baseCtx({
+          ...seededAgain!,
+          openId: `owner-${seededAgain!.id}`,
+          lastSignedIn: new Date(),
+        }),
+      );
+
+      // Add court to owned venue.
+      await ownerCaller.owner.createCourt({ venueId: arena.id, courtNumber: "Court 99" });
+      const courts = await ownerCaller.owner.courtsForVenue({ venueId: arena.id });
+      const added = courts.find(c => c.courtNumber === "Court 99")!;
+      expect(added).toBeDefined();
+
+      // Adding to a venue the owner does not own is denied.
+      await expect(
+        ownerCaller.owner.createCourt({ venueId: other.id, courtNumber: "Court 99" }),
+      ).rejects.toThrow(/do not own/i);
+      const ownedIds = await ownerCaller.owner.myVenues().then(v => v.map(x => x.id));
+      expect(ownedIds).not.toContain(other.id);
+
+      // Removing a court at a venue the owner does not own is denied.
+      const otherCourts = await adminCaller.courts.byVenue({ venueId: other.id });
+      const nonOwnedCourt = otherCourts.find(c => c.status === "available")!;
+      await expect(
+        ownerCaller.owner.removeCourt({ courtId: nonOwnedCourt.id }),
+      ).rejects.toThrow(/do not own/i);
+
+      // Remove the added court (no upcoming bookings).
+      await ownerCaller.owner.removeCourt({ courtId: added.id });
+      const afterRemove = await ownerCaller.owner.courtsForVenue({ venueId: arena.id });
+      expect(afterRemove.map(c => c.id)).not.toContain(added.id);
+    } finally {
+      vi.useRealTimers();
+      const rawDb = await getDb();
+      if (rawDb) {
+        await rawDb.delete(venueOwners).where(sql`1 = 1`).catch(() => undefined);
+        await rawDb.delete(courtsTable).where(eq(courtsTable.courtNumber, "Court 99")).catch(() => undefined);
+      }
+    }
+  },
+  15000,
+);
+
+  it("refuses to remove a court with upcoming bookings", async () => {
+    vi.useFakeTimers({ now: new Date("2026-09-01T12:00:00Z") });
+    const email = `bookguard-${Date.now()}@example.com`;
+    try {
+      await upsertUser({ openId: `test-${email}`, email, role: "user" });
+      const seeded = await getUserByEmail(email);
+      const adminCaller = appRouter.createCaller(adminCtx());
+      const venueRows = await listVenues();
+      const arena = venueRows.find(v => v.name === "Arena Athletics")!;
+      await adminCaller.admin.grantOwnership({ venueId: arena.id, email });
+      const seededAgain = await getUserByEmail(email);
+      const ownerCaller = appRouter.createCaller(
+        baseCtx({
+          ...seededAgain!,
+          openId: `owner-${seededAgain!.id}`,
+          lastSignedIn: new Date(),
+        }),
+      );
+
+      // Add a court and book it for tomorrow.
+      await ownerCaller.owner.createCourt({ venueId: arena.id, courtNumber: "Court 99" });
+      const courts = await ownerCaller.owner.courtsForVenue({ venueId: arena.id });
+      const added = courts.find(c => c.courtNumber === "Court 99")!;
+      const tomorrow = "2026-09-02";
+      await ownerCaller.owner.createBooking({
+        venueId: arena.id,
+        courtId: added.id,
+        playerDate: tomorrow,
+        startHour: "19:00",
+        endHour: "21:00",
+        playerName: "Test Player",
+        contact: email,
+        channel: "online",
+      });
+
+      // Removal is blocked while the booking exists.
+      await expect(
+        ownerCaller.owner.removeCourt({ courtId: added.id }),
+      ).rejects.toThrow(/upcoming bookings/i);
+
+      // After cancelling the booking (owner's list omits cancelled rows, so the
+      // booking is still visible here — cancel via the owner portal scope), removal succeeds.
+      const booked = await ownerCaller.owner.bookings({ channel: "online" });
+      const booking = booked.find(b => b.booking.courtId === added.id);
+      expect(booking).toBeDefined();
+      // Cancel the booking through the owner portal, then verify removal now
+      // succeeds because cancelled bookings no longer block court removal.
+      const rawDb = await getDb();
+      // updateBookingStatus marks the booking cancelled (the owner.list filter
+      // already hides it, but the guard must also skip cancelled rows).
+      await rawDb
+        ?.update(bookingsTable)
+        .set({ paymentStatus: "cancelled" })
+        .where(eq(bookingsTable.id, booking!.booking.id));
+      await ownerCaller.owner.removeCourt({ courtId: added.id });
+      const afterRemove = await ownerCaller.owner.courtsForVenue({ venueId: arena.id });
+      expect(afterRemove.map(c => c.id)).not.toContain(added.id);
+    } finally {
+      vi.useRealTimers();
+      const rawDb = await getDb();
+      if (rawDb) {
+        await rawDb.delete(bookingsTable).where(sql`1 = 1`);
+        await rawDb.delete(venueOwners).where(sql`1 = 1`);
+        await rawDb.delete(courtsTable).where(eq(courtsTable.courtNumber, "Court 99"));
+      }
+    }
+  },
+  30000,
+);
 });

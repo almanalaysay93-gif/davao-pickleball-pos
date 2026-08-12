@@ -1,18 +1,15 @@
-# Build Notes — Owner login accessibility (in progress)
+# Build Notes — Court add/remove feature (COMPLETE)
 
-## Current task
-User asked: "Where's the option for the cart owner? The login option" — desktop nav had NO sign-in button. Making login clearly accessible.
+## User request
+"in the admin add a option to add or remove a court"
 
 ## Done
-1. SiteLayout.tsx: desktop Sign In button (outline, UserRound, calls startLogin) when logged out; logged in shows name + Sign Out. `const { user, logout } = useAuth();`
-2. Owner.tsx gate (signed-in but not owner): improved messaging, added Sign In button.
+1. server/db.ts: addCourt(venueId, courtNumber) (duplicate guard), removeCourt(courtId) (rejects if bookings.playerDate >= today YYYY-MM-DD).
+2. server/routers.ts: bookings.createCourt + bookings.removeCourt (adminProcedure); owner.createCourt + owner.removeCourt (ownerProcedure, scoped via ownedVenueIds).
+3. Admin.tsx: "Courts" card with AddCourtDialog (venue select + label), remove Trash2 button per court w/ confirm.
+4. Owner.tsx: VenuePanel courts list with AddCourtDialog + remove buttons.
+5. Tests: 28/28 passing (added 3 court add/remove tests).
 
 ## Remaining
-- Optionally: owner self-serve claim UI in Admin panel (admin.grantOwnership(email, venueId) already exists) — earlier user expressed interest.
-- Typecheck + tests (25), screenshot verify Home, checkpoint, deliver.
-
-## Key facts
-- Prior delivered checkpoint: 72f631be. Domain: davaopickpos-jrhmrcab.manus.space.
-- admin.grantOwnership procedure in routers.ts takes email + venueId.
-- useAuth exports: user, loading, logout, startLogin (startLogin in @/const).
-- Old 08:37 esbuild BookingInput errors are stale; tsc 0 errors at 09:05.
+Screenshot verified (/admin shows Courts card w/ Add court button). Next: update todo, checkpoint, deliver.
+Domain: davaopickpos-jrhmrcab.manus.space. Auto-publish on.

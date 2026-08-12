@@ -30,6 +30,7 @@ import {
   Loader2,
   MapPin,
   Megaphone,
+  Plus,
   ReceiptText,
   Trash2,
   UserPlus,
@@ -783,6 +784,61 @@ function StatusBadge({ status }: { status: string }) {
   return <Badge className="bg-warning/20 text-warning-foreground border-0">Pending</Badge>;
 }
 
+function AddCourtDialog({ venueId }: { venueId: number }) {
+  const utils = trpc.useUtils();
+  const [open, setOpen] = useState(false);
+  const [courtNumber, setCourtNumber] = useState("");
+
+  const create = trpc.owner.createCourt.useMutation({
+    onSuccess: () => {
+      toast.success("Court added");
+      setCourtNumber("");
+      setOpen(false);
+      utils.owner.courtsForVenue.invalidate({ venueId });
+    },
+    onError: e => toast.error(e.message),
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm" className="press bg-transparent text-xs">
+          <Plus className="h-3.5 w-3.5 mr-1" /> Add court
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Add a court</DialogTitle>
+          <DialogDescription>
+            Add a new court to this venue, e.g. “Court 9”.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-1.5">
+          <Label>Court label *</Label>
+          <Input
+            className="bg-background"
+            placeholder="Court 9"
+            value={courtNumber}
+            onChange={e => setCourtNumber(e.target.value)}
+            maxLength={16}
+          />
+        </div>
+        <DialogFooter>
+          <Button variant="outline" className="press bg-transparent" onClick={() => setOpen(false)}>
+            Cancel
+          </Button>
+          <Button
+            className="press"
+            disabled={create.isPending || !courtNumber.trim()}
+            onClick={() => create.mutate({ venueId, courtNumber: courtNumber.trim() })}>
+            {create.isPending ? "Adding…" : "Add court"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function VenuePanel({ venueId }: { venueId: number }) {
   const utils = trpc.useUtils();
   const [courtVenueId, setCourtVenueId] = useState(venueId);
@@ -804,6 +860,14 @@ function VenuePanel({ venueId }: { venueId: number }) {
   const setCourtStatus = trpc.owner.setCourtStatus.useMutation({
     onSuccess: () => {
       toast.success("Court status updated");
+      utils.owner.courtsForVenue.invalidate({ venueId });
+    },
+    onError: e => toast.error(e.message),
+  });
+
+  const removeCourt = trpc.owner.removeCourt.useMutation({
+    onSuccess: () => {
+      toast.success("Court removed");
       utils.owner.courtsForVenue.invalidate({ venueId });
     },
     onError: e => toast.error(e.message),
@@ -831,28 +895,46 @@ function VenuePanel({ venueId }: { venueId: number }) {
           <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
             <Wrench className="h-3 w-3" /> Courts
           </p>
-          <div className="mt-2 flex flex-wrap gap-1.5">
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
             {courts.data?.map(c => (
-              <Button
-                key={c.id}
-                variant="outline"
-                size="sm"
-                className={`press bg-transparent text-xs ${
-                  c.status === "maintenance"
-                    ? "border-destructive/40 text-destructive hover:bg-destructive/10"
-                    : "border-success/40 text-success hover:bg-success/10"
-                }`}
-                onClick={() =>
-                  setCourtStatus.mutate({
-                    courtId: c.id,
-                    status: c.status === "available" ? "maintenance" : "available",
-                  })
-                }>
-                {c.courtNumber}
-                {c.status === "maintenance" ? " · down" : " · up"}
-              </Button>
+              <div key={c.id} className="flex items-center">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className={`press bg-transparent text-xs ${
+                    c.status === "maintenance"
+                      ? "border-destructive/40 text-destructive hover:bg-destructive/10"
+                      : "border-success/40 text-success hover:bg-success/10"
+                  }`}
+                  onClick={() =>
+                    setCourtStatus.mutate({
+                      courtId: c.id,
+                      status: c.status === "available" ? "maintenance" : "available",
+                    })
+                  }>
+                  {c.courtNumber}
+                  {c.status === "maintenance" ? " · down" : " · up"}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 press bg-transparent text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                  title="Remove court"
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        `Remove ${c.courtNumber}? Courts with upcoming bookings cannot be removed.`,
+                      )
+                    ) {
+                      removeCourt.mutate({ courtId: c.id });
+                    }
+                  }}>
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </div>
             ))}
             {courts.isLoading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+            <AddCourtDialog venueId={venueId} />
           </div>
         </div>
 

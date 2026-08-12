@@ -73,3 +73,12 @@
 - [x] My Bookings + Owner links discoverable pre-sign-in via Sign In landing info
 - [x] Admin "Venue owners" panel: grant ownership by email + owners list (admin.admin.grantOwnership + admin.owners)
 - [x] Typecheck + tests pass (25/25), checkpoint, deliver
+
+## Court Add/Remove Management
+- [x] DB helpers: addCourt(venueId, courtNumber) and removeCourt(courtId)
+- [x] Admin procedures: bookings.createCourt / bookings.removeCourt (adminProcedure), with upcoming-booking guard
+- [x] Owner procedures: owner.createCourt / owner.removeCourt scoped to owned venues
+- [x] Admin dashboard: "Courts" card (add court dialog, remove court button per court, status toggle)
+- [x] Owner portal: same court management for owned venues
+- [x] Vitest coverage for add/remove RBAC + booking conflict guard (28/28 passing)
+- [x] Typecheck + tests pass, checkpoint, deliver
