@@ -27,11 +27,24 @@ const trpcClient = trpc.createClient({
     httpBatchLink({
       url: "/api/trpc",
       transformer: superjson,
-      fetch(input, init) {
-        return globalThis.fetch(input, {
+      async fetch(input, init) {
+        const res = await globalThis.fetch(input, {
           ...(init ?? {}),
           credentials: "include",
         });
+        // Guard against non-JSON responses (e.g. an HTML error page served by
+        // the edge proxy during a deployment rollout or a mis-routed request).
+        // Without this, tRPC's JSON parser throws the cryptic "Unexpected
+        // token '<', "<!doctype "... is not valid JSON" error.
+        const ct = res.headers.get("content-type") ?? "";
+        if (!ct.includes("json") && !ct.includes("text/plain")) {
+          const text = await res.text().catch(() => "");
+          const msg = text.startsWith("<!doctype")
+            ? `The server returned an HTML page instead of JSON (HTTP ${res.status}). This usually happens during a short deployment rollout — refreshing the page typically fixes it.`
+            : `The server returned a non-JSON response (HTTP ${res.status}, ${ct}). Response: ${text.slice(0, 100)}`;
+          throw new Error(`[tRPC] ${msg}`);
+        }
+        return res;
       },
     }),
   ],

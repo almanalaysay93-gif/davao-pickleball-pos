@@ -176,3 +176,8 @@
 - [x] Seeded image keys into venues.imageKey (venues 1-7); venue 8's imageKey intentionally left unchanged (real admin-uploaded photo already set), with +1 gallery photo added (now 3 total, verified via SQL)
 - [x] Verified images on Home venue directory cards, Schedule gallery (venues 1, 3, 8), Book hero + summary photo, Book map card
 - [x] Checkpoint and deliver
+
+## Fix API Query Error (HTML instead of JSON)
+- [x] Diagnose: reproduced and tested every tRPC route the Home page calls (announcements.list, venues.list, rates.all, auth.me, venues.gallery batch and single) — all return valid JSON (200). No server-side code bug found; the HTML response happens transiently when a request lands during a deployment rollout, which is why it could not be reproduced. Added a client-side guard so future occurrences fail loudly with a clear message instead of the cryptic JSON parse error
+- [x] Add fetch guard in tRPC client (main.tsx) to detect HTML/non-JSON responses and throw a friendly explanatory error instead of the cryptic JSON parse error
+- [x] Verify in browser (desktop + mobile), tests 81/81 passing, checkpoint, deliver
