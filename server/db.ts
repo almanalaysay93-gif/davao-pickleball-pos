@@ -471,3 +471,74 @@ export async function deleteAnnouncement(id: number) {
   if (!db) throw new Error("Database not available");
   return db.delete(announcements).where(eq(announcements.id, id));
 }
+
+// ---------------- Venue management (master admin) ----------------
+
+export async function createVenue(data: typeof venues.$inferInsert, initialCourts: number, rates: { tierName: "daytime" | "nighttime"; startHour: string; endHour: string; pricePerHour: string }[]) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  // Refuse duplicate venue name (case-insensitive)
+  const existing = await db.select().from(venues).where(sql`LOWER(${venues.name}) = LOWER(${data.name})`).limit(1);
+  if (existing.length > 0) throw new Error(`A venue named "${data.name}" already exists`);
+  const [inserted] = await db.insert(venues).values(data);
+  const venueId = (inserted as any).insertId as number;
+  const count = Math.max(1, Math.min(20, Math.floor(initialCourts) || 1));
+  for (let i = 1; i <= count; i++) {
+    await db.insert(courts).values({ venueId, courtNumber: `Court ${i}` });
+  }
+  if (rates.length > 0) {
+    await db.insert(rateTiers).values(
+      rates.map(r => ({ venueId, tierName: r.tierName, startHour: r.startHour, endHour: r.endHour, pricePerHour: r.pricePerHour })),
+    );
+  } else {
+    // Sensible default: single all-day tier
+    await db.insert(rateTiers).values({ venueId, tierName: "daytime", startHour: data.openTime || "06:00", endHour: data.closeTime || "22:00", pricePerHour: "100.00" });
+  }
+  return { venueId };
+}
+
+export async function updateVenue(venueId: number, data: Partial<typeof venues.$inferInsert>) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const venue = await getVenueById(venueId);
+  if (!venue) throw new Error("Venue not found");
+  if (data.name) {
+    const dup = await db
+      .select()
+      .from(venues)
+      .where(and(sql`LOWER(${venues.name}) = LOWER(${data.name})`, sql`${venues.id} <> ${venueId}`))
+      .limit(1);
+    if (dup.length > 0) throw new Error(`A venue named "${data.name}" already exists`);
+  }
+  await db.update(venues).set(data).where(eq(venues.id, venueId));
+  return { success: true } as const;
+}
+
+export async function deleteVenue(venueId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const venue = await getVenueById(venueId);
+  if (!venue) throw new Error("Venue not found");
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const withBookings = await db
+    .select({ id: bookings.id })
+    .from(bookings)
+    .where(
+      and(
+        eq(bookings.venueId, venueId),
+        sql`${bookings.playerDate} >= ${today}`,
+        inArray(bookings.paymentStatus, ["pending", "paid"]),
+      ),
+    );
+  if (withBookings.length > 0) throw new Error("This venue has upcoming bookings or paid reservations — cancel or wait for them to pass");
+  // leaf-to-root deletion: rate tiers, announcements, ownership grants, courts, bookings, then venue
+  await db.delete(rateTiers).where(eq(rateTiers.venueId, venueId));
+  await db.delete(announcements).where(eq(announcements.venueId, venueId));
+  await db.delete(venueOwners).where(eq(venueOwners.venueId, venueId));
+  await db.delete(courts).where(eq(courts.venueId, venueId));
+  await db.delete(bookings).where(eq(bookings.venueId, venueId));
+  await db.execute(sql`DELETE FROM ownerCredentials WHERE venueId = ${venueId}`);
+  await db.delete(venues).where(eq(venues.id, venueId));
+  return { success: true } as const;
+}

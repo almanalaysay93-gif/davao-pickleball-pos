@@ -30,7 +30,7 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { Badge } from "@/components/ui/badge";
 import { formatHour, formatPHP, priceSlot } from "@shared/rates";
 import { Link } from "wouter";
-import { BadgeCheck, BadgeX, Clock, DoorOpen, Loader2, ReceiptText, Wrench, UserPlus, KeyRound, Plus, Trash2 } from "lucide-react";
+import { BadgeCheck, BadgeX, Clock, DoorOpen, Loader2, ReceiptText, Wrench, UserPlus, KeyRound, Plus, Trash2, Pencil } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
@@ -226,6 +226,7 @@ function AdminDashboard() {
       </Card>
 
       <CourtStatusCard />
+      <ManageVenuesCard />
       <OwnerAccountsCard />
       <OwnershipCard />
     </div>
@@ -562,6 +563,336 @@ function OwnershipCard() {
         )}
       </CardContent>
     </Card>
+  );
+}
+
+/**
+ * Manage venues (areas): create entire new venues with courts + rates,
+ * edit venue details, or remove a venue.
+ */
+function ManageVenuesCard() {
+  const utils = trpc.useUtils();
+  const venues = trpc.venues.list.useQuery(undefined, {
+    refetchOnWindowFocus: false,
+  });
+
+  const deleteVenue = trpc.venues.delete.useMutation({
+    onSuccess: () => {
+      toast.success("Venue removed — it no longer appears for players or owners");
+      utils.venues.list.invalidate();
+      utils.courts.byVenue.invalidate();
+    },
+    onError: e => toast.error(e.message),
+  });
+
+  return (
+    <Card className="mt-6 border-border bg-card">
+      <CardContent className="p-6">
+        <div className="flex items-start justify-between flex-wrap gap-3">
+          <div>
+            <h3 className="font-display text-lg font-semibold flex items-center gap-2">
+              <Wrench className="h-5 w-5 text-accent" /> Manage venues
+            </h3>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Add a new area to Davao's court network, edit its details, or remove a venue.
+              A new venue comes with its courts, opening hours, and day/night rates. Removing
+              a venue also removes its courts, rates, and announcements — venues with upcoming
+              or paid bookings can't be removed.
+            </p>
+          </div>
+          <VenueFormDialog venues={[]} />
+        </div>
+
+        {venues.isLoading ? (
+          <div className="mt-4 flex justify-center">
+            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          </div>
+        ) : !venues.data?.length ? (
+          <p className="mt-4 text-sm text-muted-foreground">No venues yet — add the first one above.</p>
+        ) : (
+          <div className="mt-4 grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {venues.data.map(v => (
+              <div
+                key={v.id}
+                className="border border-border rounded-lg p-4 flex flex-col gap-2 bg-background/40">
+                <div className="flex items-start justify-between gap-2">
+                  <p className="font-display font-semibold text-sm leading-tight">{v.name}</p>
+                  <Badge variant="outline" className="shrink-0 text-[10px] uppercase tracking-wide">
+                    {v.surfaceType}
+                  </Badge>
+                </div>
+                <p className="text-xs text-muted-foreground line-clamp-2">{v.address}</p>
+                <p className="text-xs text-muted-foreground">
+                  {formatHour(v.openTime)}–{formatHour(v.closeTime)} · {(v as EditableVenue).courtCount ?? "—"} court(s)
+                </p>
+                <div className="flex gap-1.5 mt-auto pt-1">
+                  <VenueFormDialog venues={[v]} />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 press bg-transparent text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                    title="Remove venue"
+                    disabled={deleteVenue.isPending}
+                    onClick={() => {
+                      if (
+                        window.confirm(
+                          `Remove the venue "${v.name}"? This deletes its courts, rates, announcements and ALL of its bookings permanently.`,
+                        )
+                      ) {
+                        deleteVenue.mutate({ venueId: v.id });
+                      }
+                    }}>
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/** Create or edit a venue. If a venue is passed, it edits that venue. */
+type EditableVenue = { id: number; name: string; address: string; district?: string | null; surfaceType: string; openTime: string; closeTime: string; phone?: string | null; description?: string | null; courtCount?: number };
+
+function VenueFormDialog({ venues }: { venues: EditableVenue[] }) {
+  const utils = trpc.useUtils();
+  const [open, setOpen] = useState(false);
+  const editing = venues[0]?.id ? venues[0] : undefined;
+
+  const [name, setName] = useState("");
+  const [address, setAddress] = useState("");
+  const [district, setDistrict] = useState("");
+  const [surfaceType, setSurfaceType] = useState<"indoor" | "outdoor" | "covered">("indoor");
+  const [openTime, setOpenTime] = useState("06:00");
+  const [closeTime, setCloseTime] = useState("22:00");
+  const [phone, setPhone] = useState("");
+  const [description, setDescription] = useState("");
+  const [courtCount, setCourtCount] = useState("4");
+  const [dayRate, setDayRate] = useState("");
+  const [nightRate, setNightRate] = useState("");
+
+  const create = trpc.venues.create.useMutation({
+    onSuccess: () => {
+      toast.success("New venue added — it now appears in the booking app");
+      utils.venues.list.invalidate();
+      utils.courts.byVenue.invalidate();
+      utils.rates.byVenue.invalidate();
+      utils.rates.all.invalidate();
+      setOpen(false);
+    },
+    onError: e => toast.error(e.message),
+  });
+  const update = trpc.venues.update.useMutation({
+    onSuccess: () => {
+      toast.success("Venue updated");
+      utils.venues.list.invalidate();
+      utils.courts.byVenue.invalidate();
+      utils.rates.byVenue.invalidate();
+      utils.rates.all.invalidate();
+      setOpen(false);
+    },
+    onError: e => toast.error(e.message),
+  });
+
+  const openEditing = () => {
+    if (!editing) return;
+    setName(editing.name);
+    setAddress(editing.address);
+    setDistrict(editing.district ?? "");
+    setSurfaceType((editing.surfaceType as "indoor" | "outdoor" | "covered") ?? "indoor");
+    setOpenTime(editing.openTime);
+    setCloseTime(editing.closeTime);
+    setPhone(editing.phone ?? "");
+    setDescription(editing.description ?? "");
+    setCourtCount(String(editing.courtCount ?? 1));
+    setDayRate("");
+    setNightRate("");
+    setOpen(true);
+  };
+
+  const openNew = () => {
+    if (!editing) {
+      setName("");
+      setAddress("");
+      setDistrict("");
+      setSurfaceType("indoor");
+      setOpenTime("06:00");
+      setCloseTime("22:00");
+      setPhone("");
+      setDescription("");
+      setCourtCount("4");
+      setDayRate("");
+      setNightRate("");
+    }
+    setOpen(true);
+  };
+
+  const submit = () => {
+    if (!name.trim() || !address.trim()) {
+      toast.error("Venue name and address are required");
+      return;
+    }
+    if (editing) {
+      update.mutate({
+        venueId: editing.id!,
+        name: name.trim(),
+        address: address.trim(),
+        district: district.trim() || undefined,
+        surfaceType,
+        openTime,
+        closeTime,
+        phone: phone.trim() || undefined,
+        description: description.trim() || undefined,
+      });
+    } else {
+      create.mutate({
+        name: name.trim(),
+        address: address.trim(),
+        district: district.trim() || undefined,
+        surfaceType,
+        openTime,
+        closeTime,
+        phone: phone.trim() || undefined,
+        description: description.trim() || undefined,
+        courtCount: Math.max(1, Math.min(20, parseInt(courtCount, 10) || 1)),
+        dayRate: dayRate.trim() || undefined,
+        nightRate: nightRate.trim() || undefined,
+      });
+    }
+  };
+
+  const timeInvalid =
+    open &&
+    (() => {
+      const oh = parseInt(openTime.split(":")[0], 10) * 60 + parseInt(openTime.split(":")[1], 10);
+      const ch = parseInt(closeTime.split(":")[0], 10) * 60 + parseInt(closeTime.split(":")[1], 10);
+      return ch <= oh;
+    })();
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={o => {
+        setOpen(o);
+      }}>
+      <DialogTrigger asChild>
+        {editing ? (
+          <Button variant="outline" size="sm" className="press bg-transparent" onClick={openEditing}>
+            <Pencil className="h-4 w-4 mr-1.5" /> Edit
+          </Button>
+        ) : (
+          <Button className="press" onClick={openNew}>
+            <Plus className="h-4 w-4 mr-1.5" /> Add venue
+          </Button>
+        )}
+      </DialogTrigger>
+      <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>{editing ? "Edit venue" : "Add a new venue"}</DialogTitle>
+          <DialogDescription>
+            {editing
+              ? "Update this venue's details. Courts and rates stay as they are."
+              : "Set up the venue with its courts, opening hours, and day/night rates. Courts are created automatically."}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3.5">
+          <div className="space-y-1.5">
+            <Label>Venue name *</Label>
+            <Input className="bg-background" value={name} onChange={e => setName(e.target.value)} maxLength={128} placeholder="e.g. Riverside Pickleball Club" />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Address *</Label>
+            <Input className="bg-background" value={address} onChange={e => setAddress(e.target.value)} placeholder="Street, Barangay" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label>District</Label>
+              <Input className="bg-background" value={district} onChange={e => setDistrict(e.target.value)} maxLength={64} placeholder="e.g. Matina" />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Surface</Label>
+              <Select value={surfaceType} onValueChange={v => setSurfaceType(v as typeof surfaceType)}>
+                <SelectTrigger className="bg-background">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="indoor">Indoor</SelectItem>
+                  <SelectItem value="outdoor">Outdoor</SelectItem>
+                  <SelectItem value="covered">Covered</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label>Opens</Label>
+              <Input type="time" className="bg-background" value={openTime} onChange={e => setOpenTime(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Closes</Label>
+              <Input type="time" className="bg-background" value={closeTime} onChange={e => setCloseTime(e.target.value)} />
+            </div>
+          </div>
+          {!editing && (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Number of courts</Label>
+                <Input type="number" min={1} max={20} className="bg-background" value={courtCount} onChange={e => setCourtCount(e.target.value)} />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Phone</Label>
+                <Input className="bg-background" value={phone} onChange={e => setPhone(e.target.value)} maxLength={32} placeholder="09xx xxx xxxx" />
+              </div>
+            </div>
+          )}
+          {!editing && (
+            <>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label>Day rate (₱/hr, until 18:00)</Label>
+                  <Input className="bg-background" value={dayRate} onChange={e => setDayRate(e.target.value)} placeholder="e.g. 150" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Night rate (₱/hr, from 18:00)</Label>
+                  <Input className="bg-background" value={nightRate} onChange={e => setNightRate(e.target.value)} placeholder="e.g. 200" />
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Provide a day rate (and optionally a night rate) to split pricing at 18:00. If only a
+                day rate is given, one all-day rate applies instead.
+              </p>
+            </>
+          )}
+          <div className="space-y-1.5">
+            <Label>Description (optional)</Label>
+            <Input className="bg-background" value={description} onChange={e => setDescription(e.target.value)} maxLength={2000} placeholder="Short blurb shown on the venue page" />
+          </div>
+          {timeInvalid && (
+            <p className="text-xs text-destructive">Closing time must be after opening time.</p>
+          )}
+        </div>
+        <DialogFooter>
+          <Button
+            variant="outline"
+            className="press bg-transparent"
+            onClick={() => setOpen(false)}>
+            Cancel
+          </Button>
+          <Button
+            className="press"
+            disabled={create.isPending || update.isPending || timeInvalid || !name.trim() || !address.trim()}
+            onClick={submit}>
+            {create.isPending || update.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
+            ) : null}
+            {editing ? "Save changes" : "Create venue"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

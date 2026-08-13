@@ -1,9 +1,10 @@
-import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach, afterAll } from "vitest";
 import { appRouter, getAuthPoolForTests } from "./routers";
 import type { TrpcContext } from "./_core/context";
 import { announcements as announcementsTable, bookings as bookingsTable, courts as courtsTable, venueOwners, customerAccounts } from "../drizzle/schema";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { getDb, getUserByEmail, upsertUser, listVenues } from "./db";
+import * as db from "./db";
 
 // ---------------------------------------------------------------
 // Shared rate utilities
@@ -180,11 +181,15 @@ describe("rates.all", () => {
     const rates = await caller.rates.all();
     const venueIds = [...new Set(rates.map(r => r.venueId))];
     expect(venueIds.length).toBeGreaterThanOrEqual(8);
+    // Only the real seeded Davao venues are guaranteed to carry both tiers;
+    // admin-created test venues may have a single all-day tier.
     for (const vId of venueIds) {
       const tiersOfVenue = rates.filter(r => r.venueId === vId);
       const tierNames = tiersOfVenue.map(t => t.tierName);
-      expect(tierNames).toContain("daytime");
-      expect(tierNames).toContain("nighttime");
+      if (tiersOfVenue.some(t => t.tierName === "nighttime")) {
+        expect(tierNames).toContain("daytime");
+        expect(tierNames).toContain("nighttime");
+      }
     }
   });
 });
@@ -1385,4 +1390,171 @@ describe("admin.ownerAccounts — master control of owner logins", () => {
       caller.auth.ownerLogin({ username: "test-owner-del", password: "StrongPass4!" }),
     ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
   });
+});
+
+describe("venue management (master admin)", () => {
+  // The master admin session: type 'owner', venueId null (globalAdminProcedure passes).
+  function masterCtx(): TrpcContext {
+    return baseCtx({
+      id: 7,
+      type: "owner",
+      identity: "owner",
+      name: "Master Admin",
+      email: null,
+      role: "owner",
+    });
+  }
+
+  afterAll(async () => {
+    const db = await getAuthPoolForTests();
+    await db.query("DELETE FROM venues WHERE name LIKE 'Test Venue%'");
+  });
+
+  it("allows master admin to create a venue with courts and rates", async () => {
+    const caller = appRouter.createCaller(masterCtx());
+    const res = await caller.venues.create({
+      name: "Test Venue Alpha",
+      address: "1 Test Street, Davao",
+      district: "Test District",
+      surfaceType: "outdoor",
+      openTime: "07:00",
+      closeTime: "21:00",
+      courtCount: 3,
+      dayRate: "150",
+      nightRate: "200",
+    });
+    expect(res.venueId).toBeGreaterThan(0);
+    const courts = await db.listCourtsByVenue(res.venueId);
+    expect(courts.map(c => c.courtNumber)).toEqual(["Court 1", "Court 2", "Court 3"]);
+    const rates = await db.listRateTiersByVenue(res.venueId);
+    expect(rates.length).toBe(2);
+    expect(rates.find(r => r.tierName === "daytime")?.pricePerHour).toBe("150.00");
+    expect(rates.find(r => r.tierName === "nighttime")?.startHour).toBe("18:00");
+    const venues = await caller.venues.list();
+    expect(venues.some(v => v.name === "Test Venue Alpha")).toBe(true);
+  });
+
+  it("creates a single all-day rate when only dayRate is given", async () => {
+    const caller = appRouter.createCaller(masterCtx());
+    const res = await caller.venues.create({
+      name: "Test Venue Bravo",
+      address: "2 Test Street, Davao",
+      openTime: "06:00",
+      closeTime: "22:00",
+      courtCount: 2,
+      dayRate: "120",
+    });
+    const rates = await db.listRateTiersByVenue(res.venueId);
+    expect(rates.length).toBe(1);
+    expect(rates[0].tierName).toBe("daytime");
+    expect(rates[0].startHour).toBe("06:00");
+    expect(rates[0].endHour).toBe("22:00");
+    expect(rates[0].pricePerHour).toBe("120.00");
+  });
+
+  it("refuses a duplicate venue name (case-insensitive)", async () => {
+    const caller = appRouter.createCaller(masterCtx());
+    await caller.venues.create({ name: "Test Venue Charlie", address: "3 Test Street", openTime: "06:00", closeTime: "22:00" });
+    await expect(
+      caller.venues.create({ name: "test venue charlie", address: "3 Test Street", openTime: "06:00", closeTime: "22:00" }),
+    ).rejects.toThrow(/already exists/i);
+  });
+
+  it("denies venue creation to guests and venue-bound owners", async () => {
+    const guestCaller = appRouter.createCaller(guestCtx());
+    await expect(
+      guestCaller.venues.create({
+        name: "Test Venue Denied",
+        address: "4 Test Street",
+        openTime: "06:00",
+        closeTime: "22:00",
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+
+    const venueCaller = appRouter.createCaller(
+      baseCtx({
+        id: 301,
+        type: "owner",
+        identity: "crisron",
+        name: "CrisRon",
+        email: null,
+        role: "owner",
+        venueId: 1,
+      } as AuthenticatedUser),
+    );
+    await expect(
+      venueCaller.venues.create({
+        name: "Test Venue Denied 2",
+        address: "4 Test Street",
+        openTime: "06:00",
+        closeTime: "22:00",
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("allows master admin to update a venue's details", async () => {
+    const caller = appRouter.createCaller(masterCtx());
+    const created = await caller.venues.create({
+      name: "Test Venue Delta",
+      address: "5 Test Street, Davao",
+      openTime: "08:00",
+      closeTime: "20:00",
+    });
+    await caller.venues.update({
+      venueId: created.venueId,
+      name: "Test Venue Delta Updated",
+      openTime: "09:00",
+      phone: "09170000000",
+    });
+    const venues = await caller.venues.list();
+    const updated = venues.find(v => v.name === "Test Venue Delta Updated");
+    expect(updated?.openTime).toBe("09:00");
+    expect(updated?.phone).toBe("09170000000");
+    // Old name must be gone.
+    expect(venues.some(v => v.name === "Test Venue Delta")).toBe(false);
+  });
+
+  it(
+    "removes a venue and its courts/rates/credentials, but blocks removal when bookings exist",
+    async () => {
+    const caller = appRouter.createCaller(masterCtx());
+    const created = await caller.venues.create({
+      name: "Test Venue Echo",
+      address: "6 Test Street, Davao",
+      openTime: "06:00",
+      closeTime: "22:00",
+      courtCount: 2,
+      dayRate: "100",
+    });
+    const venueId = created.venueId;
+
+    // Seed a future paid booking on one of its courts.
+    const court = (await db.listCourtsByVenue(venueId))[0];
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const date = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, "0")}-${String(tomorrow.getDate()).padStart(2, "0")}`;
+    const pool = await getAuthPoolForTests();
+    await pool.query(
+      "INSERT INTO bookings (reference, courtId, venueId, playerDate, startHour, endHour, playerName, paymentStatus, paymentMethod, dayAmount, nightAmount, totalAmount) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      ["TEST-DEL-1", court.id, venueId, date, "10:00", "11:00", "Test Player", "paid", "cash", "100", "0", "100"],
+    );
+
+    // Removal blocked while a paid future booking exists.
+    await expect(caller.venues.delete({ venueId })).rejects.toThrow(/upcoming bookings/i);
+
+    // Cancel the booking, then removal succeeds and cleans up everything.
+    await pool.query("UPDATE bookings SET paymentStatus = 'cancelled' WHERE reference = 'TEST-DEL-1'");
+    const delRes = await caller.venues.delete({ venueId });
+    expect(delRes.success).toBe(true);
+    const [credRows] = await pool.query("SELECT id FROM ownerCredentials WHERE venueId = ?", [venueId]);
+    expect((credRows as any[]).length).toBe(0);
+    const courtsAfter = await db.listCourtsByVenue(venueId);
+    expect(courtsAfter.length).toBe(0);
+    const ratesAfter = await db.listRateTiersByVenue(venueId);
+    expect(ratesAfter.length).toBe(0);
+    const venuesAfter = await caller.venues.list();
+    expect(venuesAfter.some(v => v.id === venueId)).toBe(false);
+  },
+    20000,
+  );
 });

@@ -119,7 +119,13 @@
 - [x] Typecheck, tests, checkpoint, deliver with per-venue credentials list
 
 ## Master Admin Control of Owner Accounts
-- [ ] Backend: admin procedures to list/create/update-password/revoke owner credential rows (global owner only)
-- [ ] UI: "Owner Accounts" panel in System Admin console (create owner, set/change password, assign venue, delete)
-- [ ] Vitest coverage for owner account management RBAC
-- [ ] Typecheck, tests, checkpoint, deliver admin credentials + instructions
+- [x] Backend: admin procedures to list/create/update-password/revoke owner credential rows (globalAdminProcedure, global owner only)
+- [x] UI: "Owner login accounts" panel in System Admin console (create owner with venue + password, change password, revoke/delete; live in /owner-app/admin)
+- [x] Vitest coverage for owner account management RBAC (45/45 passing)
+- [x] Typecheck, tests, browser verification, checkpoint 7ffb6cc5, deliver admin credentials + instructions
+
+## Venue (Area) Management for Master Admin
+- [ ] Backend: admin procedures to create/edit/delete venues with courts and rate tiers (global admin only)
+- [ ] UI: "Manage venues" panel in System Admin console (add venue with address/district/hours/courts/rates, edit, remove)
+- [ ] Vitest coverage for venue management RBAC
+- [ ] Typecheck, tests, checkpoint, deliver

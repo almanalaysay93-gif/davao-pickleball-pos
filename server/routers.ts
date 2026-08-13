@@ -237,6 +237,59 @@ export const appRouter = router({
 
   venues: router({
     list: publicProcedure.query(() => db.listVenues()),
+
+    /** Master admin only: create an entire venue with its courts and rate tiers. */
+    create: globalAdminProcedure
+      .input(
+        z.object({
+          name: z.string().min(1).max(128).trim(),
+          address: z.string().min(1).trim(),
+          district: z.string().max(64).trim().optional(),
+          surfaceType: z.enum(["indoor", "outdoor", "covered"]).default("indoor"),
+          openTime: z.string().regex(/^\d{2}:\d{2}$/),
+          closeTime: z.string().regex(/^\d{2}:\d{2}$/),
+          phone: z.string().max(32).trim().optional(),
+          description: z.string().max(2000).optional(),
+          courtCount: z.number().int().min(1).max(20).default(1),
+          dayRate: z.string().regex(/^\d+(\.\d{1,2})?$/).optional(),
+          nightRate: z.string().regex(/^\d+(\.\d{1,2})?$/).optional(),
+        }),
+      )
+      .mutation(async ({ input }) => {
+        const rates: Parameters<typeof db.createVenue>[2] = [];
+        if (input.dayRate && input.nightRate) {
+          rates.push({ tierName: "daytime", startHour: input.openTime, endHour: "18:00", pricePerHour: input.dayRate });
+          rates.push({ tierName: "nighttime", startHour: "18:00", endHour: input.closeTime, pricePerHour: input.nightRate });
+        } else if (input.dayRate) {
+          rates.push({ tierName: "daytime", startHour: input.openTime, endHour: input.closeTime, pricePerHour: input.dayRate });
+        }
+        return db.createVenue(input, input.courtCount, rates);
+      }),
+
+    /** Master admin only: edit venue details. */
+    update: globalAdminProcedure
+      .input(
+        z.object({
+          venueId: z.number().int().positive(),
+          name: z.string().min(1).max(128).trim().optional(),
+          address: z.string().min(1).trim().optional(),
+          district: z.string().max(64).trim().optional(),
+          surfaceType: z.enum(["indoor", "outdoor", "covered"]).optional(),
+          openTime: z.string().regex(/^\d{2}:\d{2}$/).optional(),
+          closeTime: z.string().regex(/^\d{2}:\d{2}$/).optional(),
+          phone: z.string().max(32).trim().optional(),
+          description: z.string().max(2000).optional(),
+        }),
+      )
+      .mutation(async ({ input }) => {
+        const { venueId, ...rest } = input;
+        return db.updateVenue(venueId, rest);
+      }),
+
+    /** Master admin only: remove a venue and its courts/rates/announcements/grants (blocked if it has upcoming or paid bookings). */
+    delete: globalAdminProcedure
+      .input(z.object({ venueId: z.number().int().positive() }))
+      .mutation(async ({ input }) => db.deleteVenue(input.venueId)),
   }),
 
   courts: router({
