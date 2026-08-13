@@ -1558,3 +1558,67 @@ describe("venue management (master admin)", () => {
     20000,
   );
 });
+
+describe("venue management RBAC (update/delete denial)", () => {
+  function masterCtx(): TrpcContext {
+    return baseCtx({
+      id: 9,
+      type: "owner",
+      identity: "owner",
+      name: "Master Admin",
+      email: null,
+      role: "owner",
+    });
+  }
+  function venueBoundCtx(): TrpcContext {
+    return baseCtx({
+      id: 10,
+      type: "owner",
+      identity: "crisron",
+      name: "CrisRon",
+      email: null,
+      role: "owner",
+      venueId: 1,
+    } as AuthenticatedUser);
+  }
+
+  afterAll(async () => {
+    const db = await getAuthPoolForTests();
+    await db.query("DELETE FROM venues WHERE name LIKE 'Test Venue%'");
+  });
+
+  it("denies venues.update to a venue-bound owner", async () => {
+    const masterCaller = appRouter.createCaller(masterCtx());
+    const created = await masterCaller.venues.create({
+      name: "Test Venue Foxtrot",
+      address: "7 Test Street, Davao",
+      openTime: "06:00",
+      closeTime: "22:00",
+    });
+    const venueCaller = appRouter.createCaller(venueBoundCtx());
+    await expect(
+      venueCaller.venues.update({ venueId: created.venueId, name: "Hijacked" }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("denies venues.delete to a guest and a venue-bound owner", async () => {
+    const masterCaller = appRouter.createCaller(masterCtx());
+    const created = await masterCaller.venues.create({
+      name: "Test Venue Golf",
+      address: "8 Test Street, Davao",
+      openTime: "06:00",
+      closeTime: "22:00",
+    });
+    const guestCaller = appRouter.createCaller(guestCtx());
+    await expect(guestCaller.venues.delete({ venueId: created.venueId })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    const venueCaller = appRouter.createCaller(venueBoundCtx());
+    await expect(
+      venueCaller.venues.delete({ venueId: created.venueId }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    // Master admin can still delete it to keep cleanup working.
+    const res = await masterCaller.venues.delete({ venueId: created.venueId });
+    expect(res.success).toBe(true);
+  });
+});

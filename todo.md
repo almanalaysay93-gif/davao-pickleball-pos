@@ -125,7 +125,7 @@
 - [x] Typecheck, tests, browser verification, checkpoint 7ffb6cc5, deliver admin credentials + instructions
 
 ## Venue (Area) Management for Master Admin
-- [ ] Backend: admin procedures to create/edit/delete venues with courts and rate tiers (global admin only)
-- [ ] UI: "Manage venues" panel in System Admin console (add venue with address/district/hours/courts/rates, edit, remove)
-- [ ] Vitest coverage for venue management RBAC
-- [ ] Typecheck, tests, checkpoint, deliver
+- [x] Backend: admin procedures (venues.create/update/delete/list) to create/edit/delete venues with courts and rate tiers (global admin only)
+- [x] UI: "Manage venues" panel in System Admin console (add venue with address/district/hours/courts/rates, edit, remove) — verified in browser for master admin
+- [x] Vitest coverage for venue management RBAC (8 new specs incl. update/delete denial; 63/63 passing)
+- [x] Typecheck, tests, browser verification, checkpoint b1b42fba, deliver
