@@ -162,3 +162,10 @@
 
 - [x] Vitest coverage for gallery procedures (server/venues.gallery.test.ts — auth gate, MIME/size validation, upload success, cascade on venue delete; full suite green)
 - [x] Verify layout visually (end-to-end admin upload + carousel prev/next on /schedule?venueId=8), tests pass, checkpoint, deliver
+
+## Reposition Gallery and Map per User Feedback
+- [x] Schedule page: gallery hero at very top (above filters), map card below the grid (VenueLocationMap)
+- [x] Book page: gallery hero at very top, map card below the booking form; summary panel photo unchanged
+- [x] Home page: gallery hero at top of "All venues on the map" section, VenueLocationMap cards below
+- [x] Confirmation page: gallery hero above the receipt, map-only card inside receipt; Courts dialog unchanged (gallery already at top)
+- [x] Verify visually (screenshots of Schedule/Book/Home confirm layout), tests pass 78/78, checkpoint, deliver

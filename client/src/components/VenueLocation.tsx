@@ -67,21 +67,7 @@ export function VenueLocation({ venue, className, withGallery = true }: VenueLoc
     <Card className={`border-border bg-card ${className ?? ""}`}>
       <CardContent className="p-5 md:p-6">
         <GalleryCarousel images={carousel ?? []} venueName={venue.name} />
-        <div className="flex items-start gap-2">
-          <MapPin className="h-4.5 w-4.5 mt-0.5 shrink-0 text-accent" />
-          <div className="min-w-0">
-            <p className="font-display font-semibold">{venue.name}</p>
-            <p className="text-sm text-muted-foreground">{dedupeAddress(venue.address)}</p>
-          </div>
-          <a
-            href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(directionsQuery(venue))}`}
-            target="_blank"
-            rel="noreferrer"
-            className="ml-auto shrink-0 text-[11px] font-semibold uppercase tracking-wide text-accent underline-offset-2 hover:underline">
-            Get directions
-          </a>
-        </div>
-
+        <VenueLocationInfo venue={venue} />
         <div className="mt-4">
           <VenueMap venue={venue} mapRef={mapRef} />
         </div>
@@ -90,7 +76,61 @@ export function VenueLocation({ venue, className, withGallery = true }: VenueLoc
   );
 }
 
+/** The address/name/directions info row — used by both the combined card and the standalone map card. */
+export function VenueLocationInfo({ venue }: { venue: { name: string; address: string; district?: string | null } }) {
+  return (
+    <div className="mt-3 flex items-start gap-2">
+      <MapPin className="h-4.5 w-4.5 mt-0.5 shrink-0 text-accent" />
+      <div className="min-w-0">
+        <p className="font-display font-semibold">{venue.name}</p>
+        <p className="text-sm text-muted-foreground">{dedupeAddress(venue.address)}</p>
+      </div>
+      <a
+        href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(directionsQuery(venue))}`}
+        target="_blank"
+        rel="noreferrer"
+        className="ml-auto shrink-0 text-[11px] font-semibold uppercase tracking-wide text-accent underline-offset-2 hover:underline">
+        Get directions
+      </a>
+    </div>
+  );
+}
+
+/** Carousel-only hero placed at the very top of a page (above filters/header). */
+export function VenueGalleryHero({ venue, className, withGallery = true }: VenueLocationProps) {
+  const gallery = trpc.venues.gallery.useQuery({ venueId: venue.id }, {
+    enabled: withGallery,
+    refetchOnWindowFocus: false,
+  });
+  const carousel = gallery.data && gallery.data.length > 0
+    ? gallery.data
+    : venue.imageKey
+      ? [{ id: 0, imageKey: venue.imageKey }]
+      : null;
+
+  return (
+    <div className={className ?? ""}>
+      <GalleryCarousel images={carousel ?? []} venueName={venue.name} large />
+    </div>
+  );
+}
+
 import { MapView } from "@/components/Map";
+
+/** Map-only card (with the venue info row) — placed below page content. */
+export function VenueLocationMap({ venue, className }: { venue: VenueLocationProps["venue"]; className?: string }) {
+  const mapRef = useRef<google.maps.Map | null>(null);
+  return (
+    <Card className={`border-border bg-card ${className ?? ""}`}>
+      <CardContent className="p-5 md:p-6">
+        <VenueLocationInfo venue={venue} />
+        <div className="mt-4">
+          <VenueMap venue={venue} mapRef={mapRef} />
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
 function VenueMap({
   venue,

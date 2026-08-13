@@ -15,7 +15,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useLocation, useSearch } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { AnnouncementsBanner } from "@/components/AnnouncementsBanner";
-import { VenueLocation } from "@/components/VenueLocation";
+import { VenueLocationMap, VenueGalleryHero } from "@/components/VenueLocation";
 
 type TimeFilter = "all" | "morning" | "afternoon" | "evening";
 
@@ -116,6 +116,13 @@ export default function Schedule() {
 
   return (
     <div className="container py-10 md:py-14 fade-in">
+      {/* Photo gallery hero at the very top of the page */}
+      {venue && (
+        <div className="-mt-2 mb-6 md:mb-8">
+          <VenueGalleryHero venue={venue} />
+        </div>
+      )}
+
       <div className="max-w-2xl">
         <p className="text-xs font-semibold uppercase tracking-[0.22em] text-accent">
           Schedule &amp; availability
@@ -196,9 +203,10 @@ export default function Schedule() {
         </CardContent>
       </Card>
 
+      {/* Map with venue info, below the availability grid */}
       {venue && !availability.isLoading && (
         <div className="mt-6">
-          <VenueLocation venue={venue} />
+          <VenueLocationMap venue={venue} />
         </div>
       )}
 

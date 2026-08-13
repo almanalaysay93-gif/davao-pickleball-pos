@@ -15,7 +15,7 @@ import {
 import { Link } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { AnnouncementsBanner } from "@/components/AnnouncementsBanner";
-import { VenueLocation } from "@/components/VenueLocation";
+import { VenueLocationMap, VenueGalleryHero } from "@/components/VenueLocation";
 
 const highlights = [
   {
@@ -258,9 +258,13 @@ export default function Home() {
               All venues on the map
             </h2>
           </div>
+          {/* Photo gallery hero at the top of the venue section */}
+          <div className="mt-6">
+            <VenueGalleryHero venue={venues[0]} />
+          </div>
           <div className="mt-6 grid gap-4 lg:grid-cols-2">
             {venues.map(v => (
-              <VenueLocation key={v.id} venue={v} />
+              <VenueLocationMap key={v.id} venue={v} />
             ))}
           </div>
         </section>

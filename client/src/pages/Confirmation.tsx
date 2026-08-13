@@ -5,7 +5,7 @@ import { BadgeCheck, CalendarDays, CircleDollarSign, Clock, MapPin, Printer } fr
 import { Link, useRoute } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { useBooking } from "@/contexts/BookingContext";
-import { VenueLocation } from "@/components/VenueLocation";
+import { VenueLocationMap, VenueGalleryHero } from "@/components/VenueLocation";
 import { useEffect } from "react";
 
 export default function Confirmation() {
@@ -37,6 +37,13 @@ export default function Confirmation() {
 
   return (
     <div className="container py-12 md:py-16 fade-in">
+      {/* Photo gallery hero at the very top of the page */}
+      {data?.venue && (
+        <div className="max-w-md mx-auto -mt-3 mb-6">
+          <VenueGalleryHero venue={data.venue} />
+        </div>
+      )}
+
       <div className="max-w-md mx-auto">
         <div className="text-center">
           <span className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-success/15">
@@ -126,7 +133,7 @@ export default function Confirmation() {
             </div>
             {data.venue && (
               <div className="px-6 pb-6">
-                <VenueLocation venue={data.venue} />
+                <VenueLocationMap venue={data.venue} />
               </div>
             )}
           </div>

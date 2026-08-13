@@ -13,20 +13,22 @@ interface GalleryCarouselProps {
   venueName: string;
   /** Optional fixed height class, defaults to 56 on desktop / 48 on mobile. */
   className?: string;
+  /** When true, use a taller hero height (64 on desktop / 52 on mobile) for page-top placement. */
+  large?: boolean;
 }
 
 /**
  * Carousel-style photo gallery shown at the top of venue sections.
  * Single photo renders as a plain image; multiple photos get prev/next arrows + dots.
  */
-export function GalleryCarousel({ images, venueName, className }: GalleryCarouselProps) {
+export function GalleryCarousel({ images, venueName, className, large }: GalleryCarouselProps) {
   const [index, setIndex] = useState(0);
   const count = images.length;
   const active = count > 0 ? (index + count) % count : 0;
 
   if (count === 0) {
     return (
-      <div className={`w-full h-44 md:h-56 mb-4 rounded-md border border-dashed border-border bg-background/60 flex flex-col items-center justify-center gap-1.5 text-muted-foreground ${className ?? ""}`}>
+      <div className={`w-full mb-4 rounded-md border border-dashed border-border bg-background/60 flex flex-col items-center justify-center gap-1.5 text-muted-foreground ${large ? "h-48 md:h-64" : "h-44 md:h-56"} ${className ?? ""}`}>
         <ImageOff className="h-5 w-5" />
         <p className="text-[11px]">No photos yet</p>
       </div>
@@ -37,7 +39,7 @@ export function GalleryCarousel({ images, venueName, className }: GalleryCarouse
 
   return (
     <div className={`relative mb-4 ${className ?? ""}`} data-testid="gallery-carousel">
-      <div className="w-full h-48 md:h-56 overflow-hidden rounded-md border border-border bg-muted/40">
+      <div className={`w-full overflow-hidden rounded-md border border-border bg-muted/40 ${large ? "h-52 md:h-64" : "h-48 md:h-56"}`}>
         <img
           src={`/manus-storage/${images[active].imageKey}`}
           alt={`${venueName} photo ${active + 1} of ${count}`}

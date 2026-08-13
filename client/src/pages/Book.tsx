@@ -18,7 +18,7 @@ import { useLocation, useSearch } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { useBooking } from "@/contexts/BookingContext";
 import { AnnouncementsBanner } from "@/components/AnnouncementsBanner";
-import { VenueLocation } from "@/components/VenueLocation";
+import { VenueLocationMap, VenueGalleryHero } from "@/components/VenueLocation";
 
 export default function Book() {
   const [, navigate] = useLocation();
@@ -143,6 +143,13 @@ export default function Book() {
 
   return (
     <div className="container py-10 md:py-14 fade-in">
+      {/* Photo gallery hero at the very top of the page */}
+      {venue && (
+        <div className="-mt-2 mb-6 md:mb-8">
+          <VenueGalleryHero venue={venue} />
+        </div>
+      )}
+
       <div className="max-w-2xl">
         <p className="text-xs font-semibold uppercase tracking-[0.22em] text-accent">
           Reservation
@@ -351,9 +358,10 @@ export default function Book() {
         </Card>
       </div>
 
+      {/* Map with venue info, below the booking form */}
       {venue && (
         <div className="mt-8">
-          <VenueLocation venue={venue} />
+          <VenueLocationMap venue={venue} />
         </div>
       )}
     </div>
