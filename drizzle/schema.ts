@@ -40,6 +40,20 @@ export type Venue = typeof venues.$inferSelect;
 export type InsertVenue = typeof venues.$inferInsert;
 
 /**
+ * Multi-photo gallery for venues (carousel images shown at the top of venue sections).
+ */
+export const venueGallery = mysqlTable("venueGallery", {
+  id: int("id").autoincrement().primaryKey(),
+  venueId: int("venueId").notNull(),
+  imageKey: text("imageKey").notNull(),
+  sortOrder: int("sortOrder").notNull().default(0),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type VenueGallery = typeof venueGallery.$inferSelect;
+export type InsertVenueGallery = typeof venueGallery.$inferInsert;
+
+/**
  * Individual courts within a venue.
  */
 export const courts = mysqlTable("courts", {

@@ -50,6 +50,13 @@
       "when": 1786548513393,
       "tag": "0006_puzzling_killraven",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "5",
+      "when": 1786591507010,
+      "tag": "0007_slim_tarantula",
+      "breakpoints": true
     }
   ]
 }

@@ -8,9 +8,11 @@ import {
   InsertBooking,
   InsertRateTier,
   InsertUser,
+  InsertVenueGallery,
   rateTiers,
   users,
   venues,
+  venueGallery,
   venueOwners,
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
@@ -110,6 +112,25 @@ export async function listVenues() {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
   return db.select().from(venues).orderBy(asc(venues.name));
+}
+
+export async function listGalleryByVenue(venueId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return db.select().from(venueGallery).where(eq(venueGallery.venueId, venueId)).orderBy(asc(venueGallery.sortOrder), asc(venueGallery.id));
+}
+
+export async function insertGalleryRow(data: InsertVenueGallery) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const [res] = await db.insert(venueGallery).values(data);
+  return (res as any).insertId as number;
+}
+
+export async function removeGalleryRow(id: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.delete(venueGallery).where(eq(venueGallery.id, id));
 }
 
 export async function getVenueById(id: number) {
@@ -534,6 +555,7 @@ export async function deleteVenue(venueId: number) {
   if (withBookings.length > 0) throw new Error("This venue has upcoming bookings or paid reservations — cancel or wait for them to pass");
   // leaf-to-root deletion: rate tiers, announcements, ownership grants, courts, bookings, then venue
   await db.delete(rateTiers).where(eq(rateTiers.venueId, venueId));
+  await db.delete(venueGallery).where(eq(venueGallery.venueId, venueId));
   await db.delete(announcements).where(eq(announcements.venueId, venueId));
   await db.delete(venueOwners).where(eq(venueOwners.venueId, venueId));
   await db.delete(courts).where(eq(courts.venueId, venueId));

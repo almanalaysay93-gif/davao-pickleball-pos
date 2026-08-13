@@ -30,7 +30,7 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { Badge } from "@/components/ui/badge";
 import { formatHour, formatPHP, priceSlot } from "@shared/rates";
 import { Link } from "wouter";
-import { BadgeCheck, BadgeX, Clock, DoorOpen, Loader2, ReceiptText, Wrench, UserPlus, KeyRound, Plus, Trash2, Pencil, Upload } from "lucide-react";
+import { BadgeCheck, BadgeX, Clock, DoorOpen, Loader2, ReceiptText, Wrench, UserPlus, KeyRound, Plus, Trash2, Pencil, Upload, Images } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
@@ -640,6 +640,7 @@ function ManageVenuesCard() {
                   </div>
                 )}
                 <div className="flex gap-1.5 mt-auto pt-1">
+                  <VenueGalleryDialog venueId={v.id} venueName={v.name} imageKey={v.imageKey} />
                   <VenueImageDialog venueId={v.id} venueName={v.name} imageKey={v.imageKey} />
                   <VenueFormDialog venues={[v]} />
                   <Button
@@ -1784,6 +1785,137 @@ function VenueImageDialog({ venueId, venueName, imageKey }: { venueId: number; v
               {upload.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
               Save photo
             </Button>
+          </DialogFooter>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** Manage a venue's carousel photo gallery: upload multiple photos, remove any of them. */
+function VenueGalleryDialog({ venueId, venueName, imageKey }: { venueId: number; venueName: string; imageKey: string | null }) {
+  const utils = trpc.useUtils();
+  const [open, setOpen] = useState(false);
+  const gallery = trpc.venues.gallery.useQuery({ venueId }, { enabled: open, refetchOnWindowFocus: false });
+
+  const upload = trpc.venues.uploadGalleryImage.useMutation({
+    onSuccess: data => {
+      toast.success("Photo added to the gallery");
+      utils.venues.gallery.invalidate({ venueId });
+      setOpen(false);
+      void data;
+    },
+    onError: e => toast.error(e.message),
+  });
+
+  const remove = trpc.venues.removeGalleryImage.useMutation({
+    onSuccess: () => {
+      toast.success("Photo removed from the gallery");
+      utils.venues.gallery.invalidate({ venueId });
+    },
+    onError: e => toast.error(e.message),
+  });
+
+  const filesToBase64 = async (files: FileList | null) => {
+    if (!files || files.length === 0) {
+      toast.error("Pick at least one photo first");
+      return;
+    }
+    const maxTotal = 5 * 1024 * 1024 * 5; // up to 5 files of 5 MB each
+    let total = 0;
+    const jobs: Promise<unknown>[] = [];
+    for (const f of Array.from(files)) {
+      if (!f.type.startsWith("image/")) {
+        toast.error(`"${f.name}" is not an image — skipping`);
+        continue;
+      }
+      if (f.size > 5 * 1024 * 1024) {
+        toast.error(`"${f.name}" is larger than 5 MB — skipping`);
+        continue;
+      }
+      if (total + f.size > maxTotal) {
+        toast.error("That's too many photos at once — upload in smaller batches");
+        break;
+      }
+      total += f.size;
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result!.toString().split(",")[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(f);
+      });
+      jobs.push(
+        upload.mutateAsync({ venueId, fileName: f.name, mimeType: f.type || "image/jpeg", base64 }),
+      );
+    }
+    await Promise.all(jobs);
+    toast.success(`Gallery updated for ${venueName}`);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="ghost" size="icon" className="h-8 w-8 press bg-transparent" title="Manage photo gallery">
+          <Images className="h-4 w-4" />
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Photo gallery — {venueName}</DialogTitle>
+          <DialogDescription>
+            Carousel photos shown at the top of the venue's map card and detail view.
+            {imageKey ? " The main venue photo still appears on venue cards." : ""}
+          </DialogDescription>
+        </DialogHeader>
+
+        {gallery.isLoading ? (
+          <div className="flex justify-center py-6">
+            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+            {(gallery.data ?? []).map(img => (
+              <div key={img.id} className="relative group rounded-md overflow-hidden border border-border">
+                <img
+                  src={`/manus-storage/${img.imageKey}`}
+                  alt={`${venueName} gallery photo`}
+                  className="w-full h-24 object-cover" />
+                <button
+                  type="button"
+                  aria-label="Remove this photo"
+                  className="absolute top-1.5 right-1.5 h-6 w-6 rounded-full bg-background/85 border border-border flex items-center justify-center text-destructive opacity-0 group-hover:opacity-100 transition-opacity press"
+                  disabled={remove.isPending}
+                  onClick={() => remove.mutate({ id: img.id })}>
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ))}
+            {(gallery.data ?? []).length === 0 && (
+              <p className="col-span-full text-xs text-muted-foreground italic py-3">
+                No gallery photos yet — add some below.
+              </p>
+            )}
+          </div>
+        )}
+
+        <div className="space-y-3">
+          <div className="space-y-1.5">
+            <Label>Add photos (multiple allowed)</Label>
+            <Input
+              type="file"
+              accept="image/*"
+              multiple
+              className="bg-background"
+              onChange={e => void filesToBase64(e.target.files)}
+              key={open ? "gallery-file-input" : undefined}
+              disabled={upload.isPending}
+            />
+            <p className="text-[11px] text-muted-foreground">
+              JPG, PNG, or WebP — under 5 MB each, up to 5 files per batch.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" className="press bg-transparent" onClick={() => setOpen(false)}>Close</Button>
           </DialogFooter>
         </div>
       </DialogContent>

@@ -151,3 +151,14 @@
 - [x] Book page: photo at top of the booking summary panel (verified); VenueLocation shows photo above map (verified)
 - [x] Courts detail dialog: photo already at top of dialog content (verified)
 - [x] Verify layout visually and checkpoint
+
+## Carousel-Style Venue Photo Gallery
+- [x] Schema: venueGallery table (id, venueId, imageKey, sortOrder, createdAt) + migration applied (0007_slim_tarantula.sql)
+- [x] Backend: venues.gallery list / venues.uploadGalleryImage (S3, base64, MIME/size validation) / venues.removeGalleryImage (globalAdminProcedure); deleteVenue cascade to venueGallery
+- [x] Admin UI: VenueGalleryDialog in Manage venues card (gallery button per venue, multi-file upload with MIME/size checks, remove per photo)
+- [x] GalleryCarousel component: carousel with prev/next arrows and dots
+- [x] VenueLocation (Schedule/Book/Home map card, Confirmation): gallery carousel at top of card, fallback to single imageKey
+- [x] Courts detail dialog: VenueGalleryCarousel above the dialog header
+
+- [x] Vitest coverage for gallery procedures (server/venues.gallery.test.ts — auth gate, MIME/size validation, upload success, cascade on venue delete; full suite green)
+- [x] Verify layout visually (end-to-end admin upload + carousel prev/next on /schedule?venueId=8), tests pass, checkpoint, deliver

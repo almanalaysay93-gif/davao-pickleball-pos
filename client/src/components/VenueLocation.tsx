@@ -1,6 +1,8 @@
 import { Card, CardContent } from "@/components/ui/card";
-import { MapPin, ImageOff } from "lucide-react";
-import { useRef } from "react";
+import { MapPin } from "lucide-react";
+import { useRef, useState } from "react";
+import { GalleryCarousel } from "@/components/GalleryCarousel";
+import { trpc } from "@/lib/trpc";
 
 /** Dedupe repeated place-name tokens so addresses like "Tugbok, Davao City, Tugbok, Davao City" collapse to "Tugbok, Davao City". */
 function dedupeAddress(address: string): string {
@@ -41,27 +43,30 @@ interface VenueLocationProps {
     imageKey?: string | null;
   };
   className?: string;
+  /** If false, gallery photos are not fetched (e.g. home venue cards use the card photo). */
+  withGallery?: boolean;
 }
 
-/** Geocodes the venue address and renders a Google Map plus the venue photo. */
-export function VenueLocation({ venue, className }: VenueLocationProps) {
+/** Geocodes the venue address and renders a Google Map plus a carousel photo gallery at the top. */
+export function VenueLocation({ venue, className, withGallery = true }: VenueLocationProps) {
   const mapRef = useRef<google.maps.Map | null>(null);
+  const [gallery] = useState(() => venue.id);
+  const galleryQuery = trpc.venues.gallery.useQuery({ venueId: gallery }, {
+    enabled: withGallery,
+    refetchOnWindowFocus: false,
+  });
+
+  // Carousel images if the venue has a gallery; otherwise fall back to the single venue image.
+  const carousel = galleryQuery.data && galleryQuery.data.length > 0
+    ? galleryQuery.data
+    : venue.imageKey
+      ? [{ id: 0, imageKey: venue.imageKey }]
+      : null;
 
   return (
     <Card className={`border-border bg-card ${className ?? ""}`}>
       <CardContent className="p-5 md:p-6">
-        {venue.imageKey ? (
-          <img
-            src={`/manus-storage/${venue.imageKey}`}
-            alt={`${venue.name} venue photo`}
-            className="w-full h-48 md:h-56 mb-4 rounded-md object-cover border border-border"
-          />
-        ) : (
-          <div className="w-full h-24 md:h-28 mb-4 rounded-md border border-dashed border-border bg-background/60 flex flex-col items-center justify-center gap-1.5 text-muted-foreground">
-            <ImageOff className="h-5 w-5" />
-            <p className="text-[11px]">No photo yet</p>
-          </div>
-        )}
+        <GalleryCarousel images={carousel ?? []} venueName={venue.name} />
         <div className="flex items-start gap-2">
           <MapPin className="h-4.5 w-4.5 mt-0.5 shrink-0 text-accent" />
           <div className="min-w-0">

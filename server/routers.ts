@@ -239,6 +239,45 @@ export const appRouter = router({
   venues: router({
     list: publicProcedure.query(() => db.listVenues()),
 
+    /** Public: multi-photo gallery rows for a venue, ordered by sort order. */
+    gallery: publicProcedure.input(z.object({ venueId: z.number().int().positive() })).query(({ input }) =>
+      db.listGalleryByVenue(input.venueId),
+    ),
+
+    /** Admin-only: upload an image to the venue gallery. Accepts base64-encoded image bytes. */
+    uploadGalleryImage: globalAdminProcedure
+      .input(
+        z.object({
+          venueId: z.number().int().positive(),
+          fileName: z.string().min(1).max(255),
+          mimeType: z.string().regex(/^image\/(png|jpe?g|webp)$/),
+          base64: z.string().min(1),
+        }),
+      )
+      .mutation(async ({ input }) => {
+        const venue = await db.getVenueById(input.venueId);
+        if (!venue) throw new TRPCError({ code: "NOT_FOUND", message: "Venue not found" });
+        const safeName = input.fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
+        const key = `venue-gallery/${input.venueId}-${Date.now()}-${safeName}`;
+        const buffer = Buffer.from(input.base64, "base64");
+        if (buffer.length > 8 * 1024 * 1024) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Image must be under 8 MB" });
+        }
+        const { key: storedKey } = await storagePut(key, buffer, input.mimeType);
+        const existing = await db.listGalleryByVenue(input.venueId);
+        const id = await db.insertGalleryRow({
+          venueId: input.venueId,
+          imageKey: storedKey,
+          sortOrder: existing.length,
+        });
+        return { success: true, id, imageKey: storedKey } as const;
+      }),
+
+    /** Admin-only: remove a gallery image. */
+    removeGalleryImage: globalAdminProcedure
+      .input(z.object({ id: z.number().int().positive() }))
+      .mutation(async ({ input }) => db.removeGalleryRow(input.id)),
+
     /** Master admin only: create an entire venue with its courts and rate tiers. */
     create: globalAdminProcedure
       .input(
@@ -332,7 +371,7 @@ export const appRouter = router({
         return { success: true, imageKey: storedKey, url } as const;
       }),
 
-    /** Master admin only: remove a venue and its courts/rates/announcements/grants (blocked if it has upcoming or paid bookings). */
+    /** Master admin only: remove a venue and its courts/rates/announcements/grants/gallery rows (blocked if it has upcoming or paid bookings). */
     delete: globalAdminProcedure
       .input(z.object({ venueId: z.number().int().positive() }))
       .mutation(async ({ input }) => db.deleteVenue(input.venueId)),

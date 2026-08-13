@@ -22,6 +22,7 @@ import { Link } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { AnnouncementsBanner } from "@/components/AnnouncementsBanner";
 import { MapView } from "@/components/Map";
+import { GalleryCarousel } from "@/components/GalleryCarousel";
 
 export default function Courts() {
   const { data: venues, isLoading } = trpc.venues.list.useQuery(undefined, {
@@ -122,12 +123,7 @@ export default function Courts() {
         <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
           {detail && (
             <>
-              {detail.imageKey && (
-                <img
-                  src={`/manus-storage/${detail.imageKey}`}
-                  alt={`${detail.name} venue photo`}
-                  className="w-full h-44 -mx-6 -mt-6 mb-4 rounded-t-md object-cover border-b border-border" />
-              )}
+              <VenueGalleryCarousel venueId={detail.id} venueName={detail.name} imageKey={detail.imageKey} />
               <DialogHeader>
                 <DialogTitle className="text-2xl">{detail.name}</DialogTitle>
                 <DialogDescription className="flex items-start gap-1.5 pt-1">
@@ -140,9 +136,6 @@ export default function Courts() {
                   )}
                 </DialogDescription>
               </DialogHeader>
-              <div className="rounded-md overflow-hidden border border-border mt-3 h-44">
-                <VenueMap venue={detail} />
-              </div>
               <p className="text-sm text-muted-foreground leading-relaxed mt-3">
                 {detail.description}
               </p>
@@ -199,6 +192,28 @@ export default function Courts() {
       </Dialog>
     </div>
   );
+}
+
+function VenueGalleryCarousel({
+  venueId,
+  venueName,
+  imageKey,
+}: {
+  venueId: number;
+  venueName: string;
+  imageKey?: string | null;
+}) {
+  const gallery = trpc.venues.gallery.useQuery({ venueId }, {
+    enabled: venueId > 0,
+    refetchOnWindowFocus: false,
+  });
+  const images =
+    gallery.data && gallery.data.length > 0
+      ? gallery.data
+      : imageKey
+        ? [{ id: 0, imageKey }]
+        : [];
+  return <GalleryCarousel images={images} venueName={venueName} className="-mx-6 -mt-6 mb-4" />;
 }
 
 function VenueMap({ venue }: { venue: { name: string; address: string; district?: string | null } }) {
