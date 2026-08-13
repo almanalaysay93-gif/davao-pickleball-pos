@@ -189,3 +189,8 @@
 ## Move Map Below Slot Picker (user request)
 - [x] Schedule page: VenueLocationMap moved from above the availability grid to directly below the slot picker/grid (still after filters, so the flow is carousel → title → filters → grid → map)
 - [x] Verify via screenshots (desktop + mobile), tests pass, checkpoint, deliver
+
+## Mobile Design Optimization (user request)
+- [x] Audit all customer pages on phone viewport (Home, Courts, Schedule, Book, My Bookings, Customer Login)
+- [x] Fix mobile issues found: Home hero/section spacing tightened; Schedule filter bar became a 2x2 grid with full-width Today button; slot buttons taller (h-10) for touch targets; My Bookings search stacked full-width; Schedule/Book/Courts padding tightened
+- [x] Verify mobile screenshots (all pages good), tests 81/81 passing, checkpoint, deliver

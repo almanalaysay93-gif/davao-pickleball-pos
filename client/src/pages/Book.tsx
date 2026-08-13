@@ -142,7 +142,7 @@ export default function Book() {
   };
 
   return (
-    <div className="container py-10 md:py-14 fade-in">
+    <div className="container py-7 md:py-14 fade-in">
       {/* Photo gallery hero at the very top of the page */}
       {venue && (
         <div className="-mt-2 mb-6 md:mb-8">

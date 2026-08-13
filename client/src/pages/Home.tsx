@@ -73,12 +73,12 @@ export default function Home() {
               "radial-gradient(circle at 20% 30%, oklch(0.78 0.13 85) 0%, transparent 45%), radial-gradient(circle at 80% 70%, oklch(0.6 0.09 155) 0%, transparent 40%)",
           }}
         />
-        <div className="container relative py-20 md:py-28 grid gap-10 lg:grid-cols-[1.1fr_0.9fr] items-center">
+        <div className="container relative py-14 md:py-28 grid gap-10 lg:grid-cols-[1.1fr_0.9fr] items-center">
           <div className="fade-in">
             <Badge variant="outline" className="border-accent/60 text-accent bg-accent/10 mb-5">
               Davao City · Point of Sale
             </Badge>
-            <h1 className="text-4xl md:text-6xl font-semibold text-primary-foreground leading-[1.05] text-balance">
+            <h1 className="text-[2.25rem] md:text-6xl font-semibold text-primary-foreground leading-[1.05] text-balance">
               Every court in Davao.
               <br />
               <span className="text-accent">Booked in minutes.</span>
@@ -146,7 +146,7 @@ export default function Home() {
       </section>
 
       {/* Feature highlights */}
-      <section className="container py-16 md:py-20">
+      <section className="container py-12 md:py-20">
         <div className="max-w-2xl">
           <p className="text-xs font-semibold uppercase tracking-[0.22em] text-accent">
             A complete court-side experience
@@ -249,7 +249,7 @@ export default function Home() {
 
       {/* Map of all venues */}
       {venues && venues.length > 0 && !isLoading && (
-        <section className="container py-10 md:py-14">
+        <section className="container py-8 md:py-14">
           <div className="max-w-xl">
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-accent">
               Find your court
@@ -270,8 +270,8 @@ export default function Home() {
         </section>
       )}
 
-      <section className="container py-16 md:py-20">
-        <div className="rounded-2xl bg-primary text-primary-foreground px-8 py-12 md:px-14 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+      <section className="container py-12 md:py-20">
+        <div className="rounded-2xl bg-primary text-primary-foreground px-6 py-10 md:px-14 md:py-12 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
           <div>
             <h2 className="text-2xl md:text-3xl font-semibold text-balance">
               Ready to play? Reserve your court today.

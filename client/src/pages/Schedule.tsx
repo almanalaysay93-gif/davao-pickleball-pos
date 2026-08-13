@@ -115,7 +115,7 @@ export default function Schedule() {
   const venue = venues?.find(v => v.id === venueId);
 
   return (
-    <div className="container py-10 md:py-14 fade-in">
+    <div className="container py-7 md:py-14 fade-in">
       {/* Photo gallery hero at the very top of the page */}
       {venue && (
         <div className="-mt-2 mb-6 md:mb-8">
@@ -146,7 +146,7 @@ export default function Schedule() {
       {/* Filters */}
       <Card className="mt-8 border-border bg-card">
         <CardContent className="p-5">
-          <div className="grid gap-4 md:grid-cols-[1fr_auto_auto_auto] items-center">
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-[1fr_auto_auto_auto] items-center">
             <div className="flex items-center gap-2">
               <Search className="h-4 w-4 text-muted-foreground" />
               <Select
@@ -179,7 +179,7 @@ export default function Schedule() {
             </div>
 
             <Select value={timeFilter} onValueChange={v => setTimeFilter(v as TimeFilter)}>
-              <SelectTrigger className="w-40 bg-background">
+              <SelectTrigger className="w-full md:w-40 bg-background">
                 <SelectValue placeholder="Time of day" />
               </SelectTrigger>
               <SelectContent>
@@ -192,7 +192,7 @@ export default function Schedule() {
 
             <Button
               variant="outline"
-              className="press bg-transparent"
+              className="press bg-transparent w-full md:w-auto"
               onClick={() => {
                 setPlayerDate(todayStr());
                 setTimeFilter("all");

@@ -92,7 +92,7 @@ export default function AvailabilityGrid({ slots, courts, tiers, selected, onSel
                       disabled={c.down || (occ && !interactive)}
                       onClick={() => !c.down && onSelect(c.id, h)}
                       className={cn(
-                        "slot-cell w-full h-8 rounded-md text-[11px] font-medium border",
+                        "slot-cell w-full h-10 md:h-9 rounded-md text-xs md:text-[11px] font-medium border",
                         c.down
                           ? "bg-muted text-muted-foreground border-dashed border-border cursor-not-allowed"
                           : occ

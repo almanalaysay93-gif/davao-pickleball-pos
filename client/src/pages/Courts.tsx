@@ -40,7 +40,7 @@ export default function Courts() {
   const detailTiers = selectedVenueId ? venueTiers(selectedVenueId) : [];
 
   return (
-    <div className="container py-10 md:py-14 fade-in">
+    <div className="container py-7 md:py-14 fade-in">
       <div className="space-y-6">
         <AnnouncementsBanner />
       </div>

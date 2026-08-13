@@ -74,8 +74,8 @@ export default function MyBookings() {
 
   if (!isCustomer) {
     return (
-      <section className="container max-w-2xl py-20">
-        <div className="rounded-xl border border-border bg-card p-10 text-center shadow-sm">
+      <section className="container max-w-2xl py-8 md:py-20">
+        <div className="rounded-xl border border-border bg-card px-4 py-8 md:p-10 text-center shadow-sm">
           <UserRound className="mx-auto h-10 w-10 text-muted-foreground" />
           <h1 className="mt-4 font-display text-2xl font-semibold">Your bookings</h1>
           <p className="mt-2 text-sm text-muted-foreground">
@@ -91,7 +91,7 @@ export default function MyBookings() {
             </p>
           </div>
 
-          <div className="mt-8 flex gap-2">
+          <div className="mt-8 flex flex-col sm:flex-row gap-2">
             <div className="relative flex-1">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
@@ -101,7 +101,7 @@ export default function MyBookings() {
                 className="pl-9"
               />
             </div>
-            <Button onClick={() => setSearched(query)} disabled={query.length < 3}>
+            <Button onClick={() => setSearched(query)} disabled={query.length < 3} className="sm:w-auto w-full">
               Search
             </Button>
           </div>
@@ -178,7 +178,7 @@ export default function MyBookings() {
         found with a search by name or phone number.
       </p>
 
-      <div className="mt-6 flex gap-2">
+      <div className="mt-6 flex flex-col sm:flex-row gap-2">
         <div className="relative flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -188,7 +188,7 @@ export default function MyBookings() {
             className="pl-9"
           />
         </div>
-        <Button onClick={() => setSearched(query)} disabled={query.length < 3}>
+        <Button onClick={() => setSearched(query)} disabled={query.length < 3} className="sm:w-auto w-full">
           Search guest bookings
         </Button>
       </div>
