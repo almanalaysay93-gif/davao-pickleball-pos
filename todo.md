@@ -181,3 +181,7 @@
 - [x] Diagnose: reproduced and tested every tRPC route the Home page calls (announcements.list, venues.list, rates.all, auth.me, venues.gallery batch and single) — all return valid JSON (200). No server-side code bug found; the HTML response happens transiently when a request lands during a deployment rollout, which is why it could not be reproduced. Added a client-side guard so future occurrences fail loudly with a clear message instead of the cryptic JSON parse error
 - [x] Add fetch guard in tRPC client (main.tsx) to detect HTML/non-JSON responses and throw a friendly explanatory error instead of the cryptic JSON parse error
 - [x] Verify in browser (desktop + mobile), tests 81/81 passing, checkpoint, deliver
+
+## Carousel Position Verification (user request)
+- [x] Verify Schedule page ("Browse courts by date"): image carousel at very top, directly above title, date/venue filter card, and availability grid table; map card below — confirmed via desktop and mobile screenshots
+- [x] Verify Book page: gallery hero at very top above the booking form; map below — confirmed via screenshot
