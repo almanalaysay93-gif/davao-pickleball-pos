@@ -122,6 +122,12 @@ export default function Courts() {
         <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
           {detail && (
             <>
+              {detail.imageKey && (
+                <img
+                  src={`/manus-storage/${detail.imageKey}`}
+                  alt={`${detail.name} venue photo`}
+                  className="w-full h-44 -mx-6 -mt-6 mb-4 rounded-t-md object-cover border-b border-border" />
+              )}
               <DialogHeader>
                 <DialogTitle className="text-2xl">{detail.name}</DialogTitle>
                 <DialogDescription className="flex items-start gap-1.5 pt-1">
@@ -134,12 +140,6 @@ export default function Courts() {
                   )}
                 </DialogDescription>
               </DialogHeader>
-              {detail.imageKey && (
-                <img
-                  src={`/manus-storage/${detail.imageKey}`}
-                  alt={`${detail.name} venue photo`}
-                  className="w-full h-44 rounded-md object-cover border border-border" />
-              )}
               <div className="rounded-md overflow-hidden border border-border mt-3 h-44">
                 <VenueMap venue={detail} />
               </div>

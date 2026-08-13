@@ -196,6 +196,12 @@ export default function Schedule() {
         </CardContent>
       </Card>
 
+      {venue && !availability.isLoading && (
+        <div className="mt-6">
+          <VenueLocation venue={venue} />
+        </div>
+      )}
+
       {availability.isLoading ? (
         <div className="mt-6 h-64 rounded-lg bg-muted animate-pulse" />
       ) : filtered ? (
@@ -231,11 +237,6 @@ export default function Schedule() {
             Slots spanning both tiers are split automatically at checkout.
           </p>
 
-          {venue && (
-            <div className="mt-8">
-              <VenueLocation venue={venue} />
-            </div>
-          )}
         </div>
       ) : (
         <Card className="mt-6 border-border">

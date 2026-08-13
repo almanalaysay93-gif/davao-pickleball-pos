@@ -50,6 +50,18 @@ export function VenueLocation({ venue, className }: VenueLocationProps) {
   return (
     <Card className={`border-border bg-card ${className ?? ""}`}>
       <CardContent className="p-5 md:p-6">
+        {venue.imageKey ? (
+          <img
+            src={`/manus-storage/${venue.imageKey}`}
+            alt={`${venue.name} venue photo`}
+            className="w-full h-48 md:h-56 mb-4 rounded-md object-cover border border-border"
+          />
+        ) : (
+          <div className="w-full h-24 md:h-28 mb-4 rounded-md border border-dashed border-border bg-background/60 flex flex-col items-center justify-center gap-1.5 text-muted-foreground">
+            <ImageOff className="h-5 w-5" />
+            <p className="text-[11px]">No photo yet</p>
+          </div>
+        )}
         <div className="flex items-start gap-2">
           <MapPin className="h-4.5 w-4.5 mt-0.5 shrink-0 text-accent" />
           <div className="min-w-0">
@@ -65,20 +77,8 @@ export function VenueLocation({ venue, className }: VenueLocationProps) {
           </a>
         </div>
 
-        <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_300px]">
+        <div className="mt-4">
           <VenueMap venue={venue} mapRef={mapRef} />
-          {venue.imageKey ? (
-            <img
-              src={`/manus-storage/${venue.imageKey}`}
-              alt={`${venue.name} venue photo`}
-              className="w-full h-44 lg:h-full min-h-44 rounded-md object-cover border border-border"
-            />
-          ) : (
-            <div className="w-full h-44 lg:h-full min-h-44 rounded-md border border-dashed border-border bg-background/60 flex flex-col items-center justify-center gap-1.5 text-muted-foreground">
-              <ImageOff className="h-5 w-5" />
-              <p className="text-[11px]">No photo yet</p>
-            </div>
-          )}
         </div>
       </CardContent>
     </Card>

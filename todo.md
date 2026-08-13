@@ -144,3 +144,10 @@
 - [x] Customer pages: venue photo hero on Home venue cards + Book summary panel + Courts detail; photo column in VenueLocation
 - [x] Vitest coverage for upload auth gate, MIME/size validation, and successful update (server/venues.image.test.ts; 70/70 passing)
 - [x] Typecheck, tests, screenshot verification, checkpoint, deliver
+
+## Move Venue Photos to Top
+- [x] Schedule page: venue photo hero above the day grid (VenueLocation now shows photo full-width at top, before address and map)
+- [x] Home page: venue photos at top of each venue card (verified)
+- [x] Book page: photo at top of the booking summary panel (verified); VenueLocation shows photo above map (verified)
+- [x] Courts detail dialog: photo already at top of dialog content (verified)
+- [x] Verify layout visually and checkpoint
