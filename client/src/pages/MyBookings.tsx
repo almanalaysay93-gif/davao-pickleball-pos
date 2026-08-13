@@ -291,7 +291,7 @@ function BookingList({
               <h3 className="font-display text-lg font-semibold">{venue?.name ?? "Venue"}</h3>
               {venue ? (
                 <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <MapPin className="h-3 w-3" /> {venue.address}
+                  <MapPin className="h-3.5 w-3.5" /> {venue.address}
                 </p>
               ) : null}
               <p className="flex items-center gap-1.5 text-sm font-medium">

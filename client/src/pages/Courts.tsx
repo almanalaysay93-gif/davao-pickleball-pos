@@ -84,22 +84,22 @@ export default function Courts() {
                     </Badge>
                   </div>
                   <p className="mt-2 text-sm text-muted-foreground flex items-start gap-1.5 leading-snug">
-                    <MapPin className="h-4 w-4 shrink-0 mt-0.5 text-accent" />
+                    <MapPin className="h-3.5 w-3.5 shrink-0 mt-0.5 text-accent" />
                     {v.address}
                   </p>
                   <div className="mt-4 space-y-2">
                     <div className="flex items-center gap-2 text-sm">
-                      <Clock className="h-4 w-4 text-muted-foreground" />
+                      <Clock className="h-3.5 w-3.5 text-muted-foreground" />
                       <span className="text-muted-foreground">
                         {formatHour(v.openTime)} – {v.closeTime === "00:00" ? "12:00 AM (midnight)" : formatHour(v.closeTime)}
                       </span>
                     </div>
                     <div className="flex items-center gap-2 text-sm">
-                      <Sunrise className="h-4 w-4 text-day" />
+                      <Sunrise className="h-3.5 w-3.5 text-day" />
                       <span>Daytime: <strong>{day ? formatPHP(Number(day.pricePerHour)) : "—"}/hr</strong></span>
                     </div>
                     <div className="flex items-center gap-2 text-sm">
-                      <Moon className="h-4 w-4 text-night" />
+                      <Moon className="h-3.5 w-3.5 text-night" />
                       <span>Nighttime: <strong>{night ? formatPHP(Number(night.pricePerHour)) : "—"}/hr</strong></span>
                     </div>
                   </div>
@@ -127,7 +127,7 @@ export default function Courts() {
               <DialogHeader>
                 <DialogTitle className="text-2xl">{detail.name}</DialogTitle>
                 <DialogDescription className="flex items-start gap-1.5 pt-1">
-                  <MapPin className="h-4 w-4 shrink-0 mt-0.5" />
+                  <MapPin className="h-3.5 w-3.5 shrink-0 mt-0.5" />
                   {detail.address}
                   {detail.phone && (
                     <span className="flex items-center gap-1 mt-1">
@@ -142,7 +142,7 @@ export default function Courts() {
               <div className="rounded-lg bg-secondary/60 p-4 space-y-2.5">
                 <div className="flex items-center justify-between text-sm">
                   <span className="flex items-center gap-2 font-medium">
-                    <Clock className="h-4 w-4" /> Operating Hours
+                    <Clock className="h-3.5 w-3.5" /> Operating Hours
                   </span>
                   <span>
                     {formatHour(detail.openTime)} – {detail.closeTime === "00:00" ? "12:00 AM" : formatHour(detail.closeTime)}
@@ -150,7 +150,7 @@ export default function Courts() {
                 </div>
                 <div className="flex items-center justify-between text-sm">
                   <span className="flex items-center gap-2 font-medium">
-                    <Sunrise className="h-4 w-4 text-day" /> Daytime Rate
+                    <Sunrise className="h-3.5 w-3.5 text-day" /> Daytime Rate
                   </span>
                   <span>
                     {dayRate(detailTiers)} per hour
@@ -161,7 +161,7 @@ export default function Courts() {
                 </div>
                 <div className="flex items-center justify-between text-sm">
                   <span className="flex items-center gap-2 font-medium">
-                    <Moon className="h-4 w-4 text-night" /> Nighttime Rate
+                    <Moon className="h-3.5 w-3.5 text-night" /> Nighttime Rate
                   </span>
                   <span>
                     {nightRate(detailTiers)} per hour

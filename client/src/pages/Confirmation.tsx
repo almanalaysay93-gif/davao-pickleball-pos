@@ -81,7 +81,7 @@ export default function Confirmation() {
             <div className="px-6 py-5 space-y-3.5 text-sm">
               <ReceiptRow icon={MapPin} k="Venue" v={data.venue?.name ?? "—"} />
               <p className="text-xs text-muted-foreground flex items-center gap-1.5 pl-7">
-                <MapPin className="h-3 w-3" /> {data.venue?.address}
+                <MapPin className="h-3.5 w-3.5" /> {data.venue?.address}
               </p>
               <ReceiptRow icon={CalendarDays} k="Date" v={data.booking.playerDate} />
               <ReceiptRow

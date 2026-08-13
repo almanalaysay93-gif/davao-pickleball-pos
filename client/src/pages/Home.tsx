@@ -220,16 +220,16 @@ export default function Home() {
                         </Badge>
                       </div>
                       <p className="mt-1.5 text-xs text-muted-foreground flex items-center gap-1">
-                        <MapPin className="h-3 w-3 shrink-0" />
+                        <MapPin className="h-3.5 w-3.5 shrink-0" />
                         <span className="truncate">{v.address}</span>
                       </p>
                       <div className="mt-3 flex items-center gap-3 text-xs text-muted-foreground">
                         <span className="flex items-center gap-1">
-                          <CircleDollarSign className="h-3 w-3" />
+                          <CircleDollarSign className="h-3.5 w-3.5" />
                           Day ₱{venueRates(v.id).dayRate} / Night ₱{venueRates(v.id).nightRate}
                         </span>
                         <span className="flex items-center gap-1">
-                          <Users className="h-3 w-3" />
+                          <Users className="h-3.5 w-3.5" />
                           {v.surfaceType}
                         </span>
                       </div>

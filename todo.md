@@ -194,3 +194,8 @@
 - [x] Audit all customer pages on phone viewport (Home, Courts, Schedule, Book, My Bookings, Customer Login)
 - [x] Fix mobile issues found: Home hero/section spacing tightened; Schedule filter bar became a 2x2 grid with full-width Today button; slot buttons taller (h-10) for touch targets; My Bookings search stacked full-width; Schedule/Book/Courts padding tightened
 - [x] Verify mobile screenshots (all pages good), tests 81/81 passing, checkpoint, deliver
+
+## Uniform Venue Image/Icon Sizing (user request)
+- [x] Audit icons on venue cards (Home directory, Courts cards + detail dialog, Schedule/Book map info, Confirmation, My Bookings) for uniformity
+- [x] Normalize all venue-info icons (MapPin, Clock, Sunrise, Moon, CircleDollarSign, Users) to a uniform h-3.5 w-3.5 across Courts, Home, VenueLocation, Confirmation, MyBookings; venue photos already uniform (h-36 object-cover)
+- [x] Verify mobile screenshots (Courts + Home uniform), tests 81/81 passing, checkpoint, deliver

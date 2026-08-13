@@ -80,7 +80,7 @@ export function VenueLocation({ venue, className, withGallery = true }: VenueLoc
 export function VenueLocationInfo({ venue }: { venue: { name: string; address: string; district?: string | null } }) {
   return (
     <div className="mt-3 flex items-start gap-2">
-      <MapPin className="h-4.5 w-4.5 mt-0.5 shrink-0 text-accent" />
+      <MapPin className="h-3.5 w-3.5 mt-0.5 shrink-0 text-accent" />
       <div className="min-w-0">
         <p className="font-display font-semibold">{venue.name}</p>
         <p className="text-sm text-muted-foreground">{dedupeAddress(venue.address)}</p>
