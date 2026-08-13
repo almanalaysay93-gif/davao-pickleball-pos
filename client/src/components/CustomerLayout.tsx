@@ -33,15 +33,15 @@ export default function CustomerLayout({ children }: { children: ReactNode }) {
     <div className="min-h-screen flex flex-col">
       <header className="sticky top-0 z-50 border-b border-border/70 bg-background/92 backdrop-blur-xl">
         <div className="container flex items-center justify-between h-16">
-          <Link href="/" className="flex items-center gap-2.5 group">
+          <Link href="/" className="flex items-center gap-2.5 group min-w-0 shrink">
             <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm transition-transform duration-200 group-hover:scale-105">
               <CircleDot className="h-5 w-5" />
             </span>
             <span className="flex flex-col leading-none">
-              <span className="font-display text-[17px] font-semibold tracking-tight text-foreground">
+              <span className="font-display text-[17px] font-semibold tracking-tight text-foreground truncate">
                 Davao Pickleball
               </span>
-              <span className="text-[10px] font-medium uppercase tracking-[0.22em] text-muted-foreground">
+              <span className="text-[10px] font-medium uppercase tracking-[0.22em] text-muted-foreground truncate">
                 Book a Court
               </span>
             </span>

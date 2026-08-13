@@ -204,3 +204,8 @@
 - [x] Check index.html viewport meta and CSS — root causes found: missing viewport-fit/shrink-to-fit and iOS input auto-zoom (form controls <16px)
 - [x] Added viewport-fit=cover + shrink-to-fit=no to viewport meta; 16px minimum font size on touch form controls to block iOS auto-zoom; runtime visualViewport watch in main.tsx to detect/reset zoom
 - [x] Verified on 375px viewport (Home + Schedule render correctly), tests 81/81, TypeScript clean, checkpoint, deliver
+
+## Fix Mobile Horizontal Overflow/Overlap (user screenshots)
+- [x] Reproduced — sandbox renders fine at 360px; user's clipped left edge means content spills past the screen edge; root cause: no horizontal-overflow guard
+- [x] Reworked: added `html { overflow-x: hidden }` in index.css (hard guard — nothing can spill past screen); header logo link gets min-w-0 shrink + truncate so the menu button stays visible on very narrow phones
+- [x] Verified 5 pages at 360px (Home, Courts, Schedule, Book, My Bookings — all fit, no overlap), tests 81/81, TypeScript clean, checkpoint, deliver
