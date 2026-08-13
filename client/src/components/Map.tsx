@@ -91,22 +91,36 @@ const FORGE_BASE_URL =
   import.meta.env.VITE_FRONTEND_FORGE_API_URL ||
   "https://forge.butterfly-effect.dev";
 const MAPS_PROXY_URL = `${FORGE_BASE_URL}/v1/maps/proxy`;
+const MAPS_SCRIPT_URL = `${MAPS_PROXY_URL}/maps/api/js?key=${API_KEY}&v=weekly&libraries=marker,places,geocoding,geometry`;
+
+// Module-level guard: the Maps JS API must only ever be injected once per page.
+// Multiple inclusions cause "you have included the Google Maps JavaScript API multiple times" errors.
+let mapScriptPromise: Promise<void> | null = null;
 
 function loadMapScript() {
-  return new Promise(resolve => {
+  if (window.google?.maps) return Promise.resolve();
+  if (mapScriptPromise) return mapScriptPromise;
+
+  // Dedupe any leftover duplicate <script> tags from previous mounts/navigation.
+  document.head
+    .querySelectorAll<HTMLScriptElement>(`script[src^="${MAPS_PROXY_URL}/maps/api/js"]`)
+    .forEach(s => s.remove());
+
+  mapScriptPromise = new Promise(resolve => {
     const script = document.createElement("script");
-    script.src = `${MAPS_PROXY_URL}/maps/api/js?key=${API_KEY}&v=weekly&libraries=marker,places,geocoding,geometry`;
+    script.src = MAPS_SCRIPT_URL;
     script.async = true;
     script.crossOrigin = "anonymous";
     script.onload = () => {
-      resolve(null);
-      script.remove(); // Clean up immediately
+      resolve();
     };
     script.onerror = () => {
       console.error("Failed to load Google Maps script");
+      mapScriptPromise = null;
     };
     document.head.appendChild(script);
   });
+  return mapScriptPromise;
 }
 
 interface MapViewProps {
@@ -131,6 +145,8 @@ export function MapView({
       console.error("Map container not found");
       return;
     }
+    // Skip if a map instance was already created for this container (remounts / HMR).
+    if (map.current) return;
     map.current = new window.google.maps.Map(mapContainer.current, {
       zoom: initialZoom,
       center: initialCenter,
