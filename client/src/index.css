@@ -99,3 +99,15 @@
     animation: none;
   }
 }
+
+/* iOS Safari auto-zooms the page when a form control with font-size < 16px
+   receives focus, which can leave the whole page stuck at 2x scale and cause
+   content to appear cut off/overlapping. Force all interactive form controls
+   to at least 16px so tapping an input never triggers auto-zoom. */
+@media (hover: none) and (pointer: coarse) {
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}

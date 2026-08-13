@@ -199,3 +199,8 @@
 - [x] Audit icons on venue cards (Home directory, Courts cards + detail dialog, Schedule/Book map info, Confirmation, My Bookings) for uniformity
 - [x] Normalize all venue-info icons (MapPin, Clock, Sunrise, Moon, CircleDollarSign, Users) to a uniform h-3.5 w-3.5 across Courts, Home, VenueLocation, Confirmation, MyBookings; venue photos already uniform (h-36 object-cover)
 - [x] Verify mobile screenshots (Courts + Home uniform), tests 81/81 passing, checkpoint, deliver
+
+## Fix Zoomed/Overlapping Mobile Rendering (user screenshot)
+- [x] Check index.html viewport meta and CSS — root causes found: missing viewport-fit/shrink-to-fit and iOS input auto-zoom (form controls <16px)
+- [x] Added viewport-fit=cover + shrink-to-fit=no to viewport meta; 16px minimum font size on touch form controls to block iOS auto-zoom; runtime visualViewport watch in main.tsx to detect/reset zoom
+- [x] Verified on 375px viewport (Home + Schedule render correctly), tests 81/81, TypeScript clean, checkpoint, deliver

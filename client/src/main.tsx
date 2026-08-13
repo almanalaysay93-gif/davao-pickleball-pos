@@ -50,6 +50,20 @@ const trpcClient = trpc.createClient({
   ],
 });
 
+// Prevent the page from staying zoomed on mobile (e.g. iOS auto-zooms when an
+// input smaller than 16px is focused). The viewport meta locks initial scale;
+// this watch resets the scale back to 1 if anything bumps it.
+if (typeof window !== "undefined") {
+  const resetScale = () => {
+    const scale = window.visualViewport?.scale ?? 1;
+    if (Math.abs(scale - 1) > 0.01) {
+      window.scrollTo(0, 0);
+    }
+  };
+  window.visualViewport?.addEventListener("resize", resetScale);
+  window.addEventListener("resize", resetScale);
+}
+
 createRoot(document.getElementById("root")!).render(
   <trpc.Provider client={trpcClient} queryClient={queryClient}>
     <QueryClientProvider client={queryClient}>
