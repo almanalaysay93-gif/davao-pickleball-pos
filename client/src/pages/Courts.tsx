@@ -21,6 +21,7 @@ import { useState } from "react";
 import { Link } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { AnnouncementsBanner } from "@/components/AnnouncementsBanner";
+import { MapView } from "@/components/Map";
 
 export default function Courts() {
   const { data: venues, isLoading } = trpc.venues.list.useQuery(undefined, {
@@ -118,7 +119,7 @@ export default function Courts() {
       )}
 
       <Dialog open={selectedVenueId !== null} onOpenChange={o => !o && setSelectedVenueId(null)}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
           {detail && (
             <>
               <DialogHeader>
@@ -133,7 +134,16 @@ export default function Courts() {
                   )}
                 </DialogDescription>
               </DialogHeader>
-              <p className="text-sm text-muted-foreground leading-relaxed">
+              {detail.imageKey && (
+                <img
+                  src={`/manus-storage/${detail.imageKey}`}
+                  alt={`${detail.name} venue photo`}
+                  className="w-full h-44 rounded-md object-cover border border-border" />
+              )}
+              <div className="rounded-md overflow-hidden border border-border mt-3 h-44">
+                <VenueMap venue={detail} />
+              </div>
+              <p className="text-sm text-muted-foreground leading-relaxed mt-3">
                 {detail.description}
               </p>
               <div className="rounded-lg bg-secondary/60 p-4 space-y-2.5">
@@ -188,6 +198,36 @@ export default function Courts() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+function VenueMap({ venue }: { venue: { name: string; address: string; district?: string | null } }) {
+  return (
+    <MapView
+      className="h-44"
+      initialCenter={{ lat: 7.190708, lng: 125.455341 }}
+      initialZoom={13}
+      onMapReady={map => {
+        const geocoder = new google.maps.Geocoder();
+        geocoder.geocode(
+          { address: `${venue.address}, ${venue.district ?? "Davao City"}, Philippines` },
+          (results, status) => {
+            if (status === "OK" && results && results[0]) {
+              const loc = results[0].geometry.location;
+              map.setCenter(loc);
+              map.setZoom(15);
+              new google.maps.marker.AdvancedMarkerElement({ map, position: loc, title: venue.name });
+            } else {
+              new google.maps.marker.AdvancedMarkerElement({
+                map,
+                position: { lat: 7.190708, lng: 125.455341 },
+                title: venue.name,
+              });
+            }
+          },
+        );
+      }}
+    />
   );
 }
 

@@ -15,6 +15,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useLocation, useSearch } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { AnnouncementsBanner } from "@/components/AnnouncementsBanner";
+import { VenueLocation } from "@/components/VenueLocation";
 
 type TimeFilter = "all" | "morning" | "afternoon" | "evening";
 
@@ -229,6 +230,12 @@ export default function Schedule() {
             Daytime hours are charged at the daytime rate; evening hours at the nighttime rate.
             Slots spanning both tiers are split automatically at checkout.
           </p>
+
+          {venue && (
+            <div className="mt-8">
+              <VenueLocation venue={venue} />
+            </div>
+          )}
         </div>
       ) : (
         <Card className="mt-6 border-border">

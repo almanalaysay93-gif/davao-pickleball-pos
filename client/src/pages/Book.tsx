@@ -18,6 +18,7 @@ import { useLocation, useSearch } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { useBooking } from "@/contexts/BookingContext";
 import { AnnouncementsBanner } from "@/components/AnnouncementsBanner";
+import { VenueLocation } from "@/components/VenueLocation";
 
 export default function Book() {
   const [, navigate] = useLocation();
@@ -316,6 +317,12 @@ export default function Book() {
         {/* Summary panel */}
         <Card className="border-border bg-card sticky top-24">
           <CardContent className="p-6">
+            {venue?.imageKey && (
+              <img
+                src={`/manus-storage/${venue.imageKey}`}
+                alt={`${venue.name} venue photo`}
+                className="w-full h-32 rounded-md object-cover mb-4 border border-border" />
+            )}
             <h3 className="font-display text-lg font-semibold flex items-center gap-2">
               <ReceiptText className="h-5 w-5 text-accent" /> Booking summary
             </h3>
@@ -343,6 +350,12 @@ export default function Book() {
           </CardContent>
         </Card>
       </div>
+
+      {venue && (
+        <div className="mt-8">
+          <VenueLocation venue={venue} />
+        </div>
+      )}
     </div>
   );
 }

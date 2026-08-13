@@ -5,6 +5,7 @@ import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router } from "./_core/trpc";
 import * as db from "./db";
 import { priceSlot, generateSlots } from "@shared/rates";
+import { storagePut } from "./storage";
 
 import {
   clearAuthCookies,
@@ -253,6 +254,7 @@ export const appRouter = router({
           courtCount: z.number().int().min(1).max(20).default(1),
           dayRate: z.string().regex(/^\d+(\.\d{1,2})?$/).optional(),
           nightRate: z.string().regex(/^\d+(\.\d{1,2})?$/).optional(),
+          imageKey: z.string().max(1024).optional(),
         }),
       )
       .mutation(async ({ input }) => {
@@ -297,11 +299,37 @@ export const appRouter = router({
           closeTime: z.string().regex(/^\d{2}:\d{2}$/).optional(),
           phone: z.string().max(32).trim().optional(),
           description: z.string().max(2000).optional(),
+          imageKey: z.string().max(1024).optional().nullable(),
         }),
       )
       .mutation(async ({ input }) => {
         const { venueId, ...rest } = input;
         return db.updateVenue(venueId, rest);
+      }),
+
+    /** Admin-only: upload a venue image to storage. Accepts base64-encoded image bytes. */
+    uploadVenueImage: globalAdminProcedure
+      .input(
+        z.object({
+          venueId: z.number().int().positive(),
+          fileName: z.string().min(1).max(255),
+          mimeType: z.string().regex(/^image\/(png|jpe?g|webp)$/),
+          base64: z.string().min(1),
+        }),
+      )
+      .mutation(async ({ input }) => {
+        const venue = await db.getVenueById(input.venueId);
+        if (!venue) throw new TRPCError({ code: "NOT_FOUND", message: "Venue not found" });
+        const safeName = input.fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
+        const key = `venue-images/${input.venueId}-${Date.now()}-${safeName}`;
+        const buffer = Buffer.from(input.base64, "base64");
+        if (buffer.length > 8 * 1024 * 1024) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Image must be under 8 MB" });
+        }
+        const { key: storedKey, url } = await storagePut(key, buffer, input.mimeType);
+        // Point the venue at the new image.
+        await db.updateVenue(input.venueId, { imageKey: storedKey });
+        return { success: true, imageKey: storedKey, url } as const;
       }),
 
     /** Master admin only: remove a venue and its courts/rates/announcements/grants (blocked if it has upcoming or paid bookings). */

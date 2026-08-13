@@ -30,7 +30,7 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { Badge } from "@/components/ui/badge";
 import { formatHour, formatPHP, priceSlot } from "@shared/rates";
 import { Link } from "wouter";
-import { BadgeCheck, BadgeX, Clock, DoorOpen, Loader2, ReceiptText, Wrench, UserPlus, KeyRound, Plus, Trash2, Pencil } from "lucide-react";
+import { BadgeCheck, BadgeX, Clock, DoorOpen, Loader2, ReceiptText, Wrench, UserPlus, KeyRound, Plus, Trash2, Pencil, Upload } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
@@ -625,7 +625,22 @@ function ManageVenuesCard() {
                 <p className="text-xs text-muted-foreground">
                   {formatHour(v.openTime)}–{formatHour(v.closeTime)} · {(v as EditableVenue).courtCount ?? "—"} court(s)
                 </p>
+                {v.imageKey ? (
+                  <div className="relative rounded-md overflow-hidden border border-border mt-1">
+                    <img
+                      src={`/manus-storage/${v.imageKey}`}
+                      alt={`${v.name} venue photo`}
+                      className="w-full h-28 object-cover" />
+                  </div>
+                ) : (
+                  <div className="rounded-md border border-dashed border-border bg-background/60 mt-1 flex items-center justify-center h-28">
+                    <p className="text-[11px] text-muted-foreground italic px-2 text-center">
+                      No photo yet — players will see a generic card.
+                    </p>
+                  </div>
+                )}
                 <div className="flex gap-1.5 mt-auto pt-1">
+                  <VenueImageDialog venueId={v.id} venueName={v.name} imageKey={v.imageKey} />
                   <VenueFormDialog venues={[v]} />
                   <Button
                     variant="ghost"
@@ -1637,6 +1652,140 @@ function AddCourtDialog({ defaultVenue, venues }: { defaultVenue: number | null;
             {create.isPending ? "Adding…" : "Add court"}
           </Button>
         </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** Upload, replace, or remove a venue's photo. */
+function VenueImageDialog({ venueId, venueName, imageKey }: { venueId: number; venueName: string; imageKey: string | null }) {
+  const utils = trpc.useUtils();
+  const [open, setOpen] = useState(false);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [file, setFile] = useState<File | null>(null);
+  const [selected, setSelected] = useState(false);
+
+  const upload = trpc.venues.uploadVenueImage.useMutation({
+    onSuccess: () => {
+      toast.success(`Photo saved for ${venueName}`);
+      utils.venues.list.invalidate();
+      setOpen(false);
+      setFile(null);
+      setPreview(null);
+      setSelected(false);
+    },
+    onError: e => toast.error(e.message),
+  });
+
+  const removeImage = trpc.venues.update.useMutation({
+    onSuccess: () => {
+      toast.success(`Photo removed from ${venueName}`);
+      utils.venues.list.invalidate();
+      setOpen(false);
+    },
+    onError: e => toast.error(e.message),
+  });
+
+  const onPickFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    if (!f.type.startsWith("image/")) {
+      toast.error("Please pick an image file (jpg, png, webp)");
+      return;
+    }
+    if (f.size > 5 * 1024 * 1024) {
+      toast.error("Image is too large — pick something under 5 MB");
+      return;
+    }
+    setFile(f);
+    const reader = new FileReader();
+    reader.onload = () => setPreview(reader.result as string);
+    reader.readAsDataURL(f);
+    setSelected(true);
+  };
+
+  const submit = async () => {
+    if (!file) {
+      toast.error("Pick a photo first");
+      return;
+    }
+    try {
+      const buffer = await file.arrayBuffer();
+      const base64 = btoa(
+        Array.from(new Uint8Array(buffer))
+          .map(b => String.fromCharCode(b))
+          .join(""),
+      );
+      upload.mutate({
+        venueId,
+        fileName: file.name,
+        mimeType: file.type || "image/jpeg",
+        base64,
+      });
+    } catch {
+      toast.error("Could not read that file — try another one.");
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="ghost" size="icon" className="h-8 w-8 press bg-transparent" title="Manage venue photo">
+          <Upload className="h-4 w-4" />
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Venue photo — {venueName}</DialogTitle>
+          <DialogDescription>
+            Add or replace the photo shown on the booking pages and venue cards.
+            {imageKey ? " Replacing it updates every page that shows this venue." : ""}
+          </DialogDescription>
+        </DialogHeader>
+
+        {preview ? (
+          <img src={preview} alt="Selected photo preview" className="w-full rounded-md border border-border object-cover max-h-56" />
+        ) : imageKey ? (
+          <div className="rounded-md overflow-hidden border border-border">
+            <img src={`/manus-storage/${imageKey}`} alt="Current venue photo" className="w-full h-44 object-cover" />
+          </div>
+        ) : null}
+
+        <div className="space-y-3">
+          <div className="space-y-1.5">
+            <Label>{imageKey && !selected ? "Replace photo" : "Choose photo"}</Label>
+            <Input
+              type="file"
+              accept="image/*"
+              className="bg-background"
+              onChange={onPickFile}
+              key={open ? "file-input" : undefined}
+            />
+            <p className="text-[11px] text-muted-foreground">JPG, PNG, or WebP — under 5 MB. A landscape photo of the courts looks best.</p>
+          </div>
+
+          <DialogFooter className="gap-2">
+            {imageKey && (
+                <Button
+                variant="ghost"
+                className="press bg-transparent text-destructive hover:bg-destructive/10"
+                disabled={removeImage.isPending}
+                onClick={() => {
+                  if (window.confirm(`Remove the current photo for "${venueName}"?`)) {
+                    removeImage.mutate({ venueId, imageKey: null });
+                  }
+                }}>
+                {removeImage.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                Remove photo
+              </Button>
+            )}
+            <Button variant="outline" className="press bg-transparent" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button className="press" disabled={upload.isPending || !selected} onClick={submit}>
+              {upload.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+              Save photo
+            </Button>
+          </DialogFooter>
+        </div>
       </DialogContent>
     </Dialog>
   );

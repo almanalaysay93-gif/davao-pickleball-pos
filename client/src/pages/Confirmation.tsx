@@ -5,6 +5,7 @@ import { BadgeCheck, CalendarDays, CircleDollarSign, Clock, MapPin, Printer } fr
 import { Link, useRoute } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { useBooking } from "@/contexts/BookingContext";
+import { VenueLocation } from "@/components/VenueLocation";
 import { useEffect } from "react";
 
 export default function Confirmation() {
@@ -123,6 +124,11 @@ export default function Confirmation() {
                 <Button className="w-full press">Done</Button>
               </Link>
             </div>
+            {data.venue && (
+              <div className="px-6 pb-6">
+                <VenueLocation venue={data.venue} />
+              </div>
+            )}
           </div>
         ) : null}
       </div>

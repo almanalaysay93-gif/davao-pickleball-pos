@@ -9,11 +9,13 @@ import {
   LayoutGrid,
   MapPin,
   Receipt,
+  Trophy,
   Users,
 } from "lucide-react";
 import { Link } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { AnnouncementsBanner } from "@/components/AnnouncementsBanner";
+import { VenueLocation } from "@/components/VenueLocation";
 
 const highlights = [
   {
@@ -196,9 +198,19 @@ export default function Home() {
           ) : (
             <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 stagger">
               {(venues ?? []).map(v => (
-                <Link key={v.id} href={`/courts`}>
-                  <Card className="group h-full border-border bg-background hover:border-primary/40 hover:shadow-md transition-all duration-200 cursor-pointer">
+                <Link key={v.id} href={`/schedule?venueId=${v.id}`}>
+                  <Card className="group h-full border-border bg-background hover:border-primary/40 hover:shadow-md transition-all duration-200 cursor-pointer overflow-hidden">
                     <CardContent className="p-5">
+                      {v.imageKey ? (
+                        <img
+                          src={`/manus-storage/${v.imageKey}`}
+                          alt={`${v.name} venue photo`}
+                          className="-mx-5 -mt-5 mb-3 w-[calc(100%+2.5rem)] h-36 object-cover" />
+                      ) : (
+                        <div className="-mx-5 -mt-5 mb-3 w-[calc(100%+2.5rem)] h-36 bg-gradient-to-br from-primary/15 via-accent/10 to-background flex items-center justify-center">
+                          <Trophy className="h-7 w-7 text-primary/40" />
+                        </div>
+                      )}
                       <div className="flex items-start justify-between gap-2">
                         <h3 className="font-display text-lg font-semibold leading-tight group-hover:text-primary transition-colors">
                           {v.name}
@@ -234,6 +246,25 @@ export default function Home() {
       <section className="container pt-8">
         <AnnouncementsBanner />
       </section>
+
+      {/* Map of all venues */}
+      {venues && venues.length > 0 && !isLoading && (
+        <section className="container py-10 md:py-14">
+          <div className="max-w-xl">
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-accent">
+              Find your court
+            </p>
+            <h2 className="mt-3 text-2xl md:text-3xl font-semibold text-balance">
+              All venues on the map
+            </h2>
+          </div>
+          <div className="mt-6 grid gap-4 lg:grid-cols-2">
+            {venues.map(v => (
+              <VenueLocation key={v.id} venue={v} />
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="container py-16 md:py-20">
         <div className="rounded-2xl bg-primary text-primary-foreground px-8 py-12 md:px-14 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">

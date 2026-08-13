@@ -135,3 +135,12 @@
 - [x] UI: success toast after Add venue shows the auto-created owner credentials
 - [x] Vitest coverage: verify owner credential row created on venue create (64/64 passing)
 - [x] Typecheck, tests, checkpoint, deliver
+
+## Venue Maps + Images on Booking Pages
+- [x] Schema: imageKey column already exists on venues table (no migration needed)
+- [x] Backend: venues.update accepts imageKey; venues.list returns imageKey (drizzle .select() includes all columns); uploadVenueImage S3-backed procedure (base64, MIME/size validation, globalAdminProcedure)
+- [x] Admin UI: VenueImageDialog in Manage venues card (System Admin) — upload/replace/remove venue photo; venue cards show the photo
+- [x] Customer pages: VenueLocation component with geocoded Google Map ("Get directions" link) on Home, Schedule, Courts detail dialog, Book, Confirmation
+- [x] Customer pages: venue photo hero on Home venue cards + Book summary panel + Courts detail; photo column in VenueLocation
+- [x] Vitest coverage for upload auth gate, MIME/size validation, and successful update (server/venues.image.test.ts; 70/70 passing)
+- [x] Typecheck, tests, screenshot verification, checkpoint, deliver
