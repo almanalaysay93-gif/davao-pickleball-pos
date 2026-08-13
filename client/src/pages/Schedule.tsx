@@ -203,13 +203,6 @@ export default function Schedule() {
         </CardContent>
       </Card>
 
-      {/* Map with venue info, below the availability grid */}
-      {venue && !availability.isLoading && (
-        <div className="mt-6">
-          <VenueLocationMap venue={venue} />
-        </div>
-      )}
-
       {availability.isLoading ? (
         <div className="mt-6 h-64 rounded-lg bg-muted animate-pulse" />
       ) : filtered ? (
@@ -244,7 +237,6 @@ export default function Schedule() {
             Daytime hours are charged at the daytime rate; evening hours at the nighttime rate.
             Slots spanning both tiers are split automatically at checkout.
           </p>
-
         </div>
       ) : (
         <Card className="mt-6 border-border">
@@ -252,6 +244,13 @@ export default function Schedule() {
             Select a venue above to view its schedule.
           </CardContent>
         </Card>
+      )}
+
+      {/* Map with venue info, directly below the slot picker */}
+      {venue && (
+        <div className="mt-6">
+          <VenueLocationMap venue={venue} />
+        </div>
       )}
     </div>
   );

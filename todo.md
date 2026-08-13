@@ -185,3 +185,7 @@
 ## Carousel Position Verification (user request)
 - [x] Verify Schedule page ("Browse courts by date"): image carousel at very top, directly above title, date/venue filter card, and availability grid table; map card below — confirmed via desktop and mobile screenshots
 - [x] Verify Book page: gallery hero at very top above the booking form; map below — confirmed via screenshot
+
+## Move Map Below Slot Picker (user request)
+- [x] Schedule page: VenueLocationMap moved from above the availability grid to directly below the slot picker/grid (still after filters, so the flow is carousel → title → filters → grid → map)
+- [x] Verify via screenshots (desktop + mobile), tests pass, checkpoint, deliver
