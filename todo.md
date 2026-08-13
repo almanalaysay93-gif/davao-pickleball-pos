@@ -169,3 +169,10 @@
 - [x] Home page: gallery hero at top of "All venues on the map" section, VenueLocationMap cards below
 - [x] Confirmation page: gallery hero above the receipt, map-only card inside receipt; Courts dialog unchanged (gallery already at top)
 - [x] Verify visually (screenshots of Schedule/Book/Home confirm layout), tests pass 78/78, checkpoint, deliver
+
+## Add Non-Copyrighted Venue Images
+- [x] Sourced imagery: 15 AI-generated venue photos (no copyright — generated for this project), stored via webdev image generation (auto-hosted on /manus-storage/, no manual upload)
+- [x] Images served web-optimized by the storage CDN (auto-compressed)
+- [x] Seeded image keys into venues.imageKey (venues 1-7); venue 8's imageKey intentionally left unchanged (real admin-uploaded photo already set), with +1 gallery photo added (now 3 total, verified via SQL)
+- [x] Verified images on Home venue directory cards, Schedule gallery (venues 1, 3, 8), Book hero + summary photo, Book map card
+- [x] Checkpoint and deliver
