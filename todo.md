@@ -129,3 +129,9 @@
 - [x] UI: "Manage venues" panel in System Admin console (add venue with address/district/hours/courts/rates, edit, remove) — verified in browser for master admin
 - [x] Vitest coverage for venue management RBAC (8 new specs incl. update/delete denial; 63/63 passing)
 - [x] Typecheck, tests, browser verification, checkpoint b1b42fba, deliver
+
+## Auto Owner Account on Venue Creation
+- [x] Backend: venues.create automatically creates an owner credential row (username = venue name, password Davao2026!)
+- [x] UI: success toast after Add venue shows the auto-created owner credentials
+- [x] Vitest coverage: verify owner credential row created on venue create (64/64 passing)
+- [x] Typecheck, tests, checkpoint, deliver

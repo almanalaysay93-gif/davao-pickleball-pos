@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach, afterEach, afterAll } from "vites
 import { appRouter, getAuthPoolForTests } from "./routers";
 import type { TrpcContext } from "./_core/context";
 import { announcements as announcementsTable, bookings as bookingsTable, courts as courtsTable, venueOwners, customerAccounts } from "../drizzle/schema";
+import { verifyPassword } from "./auth";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { getDb, getUserByEmail, upsertUser, listVenues } from "./db";
 import * as db from "./db";
@@ -1620,5 +1621,54 @@ describe("venue management RBAC (update/delete denial)", () => {
     // Master admin can still delete it to keep cleanup working.
     const res = await masterCaller.venues.delete({ venueId: created.venueId });
     expect(res.success).toBe(true);
+  });
+});
+
+describe("auto owner account on venue creation", () => {
+  function masterCtx(): TrpcContext {
+    return baseCtx({
+      id: 11,
+      type: "owner",
+      identity: "owner",
+      name: "Master Admin",
+      email: null,
+      role: "owner",
+    });
+  }
+
+  afterAll(async () => {
+    const db = await getAuthPoolForTests();
+    await db.query("DELETE FROM ownerCredentials WHERE username LIKE 'test venue%'");
+    await db.query("DELETE FROM venues WHERE name LIKE 'Test Venue%'");
+  });
+
+  it("auto-creates an owner login (username = venue name, password Davao2026!) when a venue is added", async () => {
+    const caller = appRouter.createCaller(masterCtx());
+    const res = await caller.venues.create({
+      name: "Test Venue Hotel",
+      address: "9 Test Street, Davao",
+      openTime: "06:00",
+      closeTime: "22:00",
+      courtCount: 1,
+    });
+    expect(res.venueId).toBeGreaterThan(0);
+    expect(res.ownerAccount?.username).toBe("test venue hotel");
+    expect(res.ownerAccount?.password).toBe("Davao2026!");
+    const [rows] = await getAuthPoolForTests().query(
+      "SELECT username, passwordHash, venueId FROM ownerCredentials WHERE username = 'test venue hotel' LIMIT 1",
+    );
+    const row = (rows as any[])[0];
+    expect(row).toBeTruthy();
+    expect(row.venueId).toBe(res.venueId);
+    const ok = await verifyPassword("Davao2026!", row.passwordHash);
+    expect(ok).toBe(true);
+    // And the auto-created account can actually sign in as the venue owner.
+    await caller.auth.ownerLogin({ username: "test venue hotel", password: "Davao2026!" });
+
+    // A duplicate venue name is rejected by the name guard, so no second credential
+    // row is ever inserted with the same username.
+    await expect(
+      caller.venues.create({ name: "Test Venue Hotel", address: "9 Test Street", openTime: "06:00", closeTime: "22:00" }),
+    ).rejects.toThrow(/already exists/i);
   });
 });

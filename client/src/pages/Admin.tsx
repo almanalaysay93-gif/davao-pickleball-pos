@@ -675,8 +675,15 @@ function VenueFormDialog({ venues }: { venues: EditableVenue[] }) {
   const [nightRate, setNightRate] = useState("");
 
   const create = trpc.venues.create.useMutation({
-    onSuccess: () => {
-      toast.success("New venue added — it now appears in the booking app");
+    onSuccess: data => {
+      if (data.ownerAccount) {
+        toast.success(
+          `${data.ownerAccount.username} added. Owner login auto-created — username "${data.ownerAccount.username}" with password Davao2026!`,
+          { duration: 8000 },
+        );
+      } else {
+        toast.success("New venue added — it now appears in the booking app");
+      }
       utils.venues.list.invalidate();
       utils.courts.byVenue.invalidate();
       utils.rates.byVenue.invalidate();

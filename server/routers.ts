@@ -263,7 +263,25 @@ export const appRouter = router({
         } else if (input.dayRate) {
           rates.push({ tierName: "daytime", startHour: input.openTime, endHour: input.closeTime, pricePerHour: input.dayRate });
         }
-        return db.createVenue(input, input.courtCount, rates);
+        const created = await db.createVenue(input, input.courtCount, rates);
+        // Automatically create a venue owner login so the new venue is immediately manageable.
+        // The username is the venue name; master login conflict is impossible because
+        // venues.create is already blocked from using the name "owner" (duplicate name guard).
+        const username = input.name.toLowerCase();
+        const [existing] = await getAuthPool().query(
+          "SELECT id FROM ownerCredentials WHERE username = ? LIMIT 1",
+          [username],
+        );
+        let ownerAccountId: number | null = null;
+        if ((existing as any[]).length === 0) {
+          const hash = await hashPassword("Davao2026!");
+          const [res] = await getAuthPool().query(
+            "INSERT INTO ownerCredentials (username, passwordHash, venueId) VALUES (?, ?, ?)",
+            [username, hash, created.venueId],
+          );
+          ownerAccountId = (res as any).insertId;
+        }
+        return { ...created, ownerAccount: ownerAccountId ? { username, password: "Davao2026!" } : null };
       }),
 
     /** Master admin only: edit venue details. */
