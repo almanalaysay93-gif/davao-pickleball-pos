@@ -219,12 +219,12 @@
 - [x] Tests pass (81/81), no UI fixes needed after audit, deliver QA report
 
 ## Migrate Database to Supabase (user request — db off Manus)
-- [ ] Create all tables on Supabase (venues, courts, rateTiers, bookings, customer_accounts, owner_credentials, announcements, venueGallery, images/products if any)
-- [ ] Migrate existing data from Manus DB to Supabase
-- [ ] Add Supabase URL + anon key as project secrets
-- [ ] Rewrite server/db.ts query helpers to use Supabase REST client
-- [ ] Verify all tRPC flows (venues, rates, bookings, auth, announcements, galleries) against Supabase
-- [ ] Run tests, checkpoint, deliver
+- [x] Create all tables on Supabase (venues, courts, rateTiers, bookings, customer_accounts, owner_credentials, announcements, venueGallery, images/products if any)
+- [x] Migrate existing data from Manus DB to Supabase
+- [x] Add Supabase URL + anon key as project secrets
+- [x] Rewrite server/db.ts query helpers to use Supabase REST client
+- [x] Verify all tRPC flows (venues, rates, bookings, auth, announcements, galleries) against Supabase
+- [x] Run tests, checkpoint, deliver (81/81 passing, live site verified, code pushed to GitHub)
 
 ## Supabase Migration (user's own Supabase project, tfwyrbqygbhrkmlapxxu)
 - [x] Create missing tables (users, venue_owners) in user's Supabase project
