@@ -434,7 +434,7 @@ function ModifyDialog({ bookingId }: { bookingId: number }) {
 function OwnershipCard() {
   const utils = trpc.useUtils();
   const venues = trpc.venues.list.useQuery(undefined, { refetchOnWindowFocus: false });
-  const owners = trpc.admin.owners.useQuery(undefined, { refetchOnWindowFocus: false });
+  const owners = trpc.admin.owners.useQuery(undefined, { refetchOnWindowFocus: false }) as ReturnType<typeof trpc.admin.owners.useQuery> & { data?: Array<{ id: number; venueId: number; userId: number; createdAt: string | null; ownerName: string | null; ownerEmail: string | null }> };
 
   const [email, setEmail] = useState("");
   const [venueId, setVenueId] = useState<number | null>(null);

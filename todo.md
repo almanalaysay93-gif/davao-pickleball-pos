@@ -209,3 +209,29 @@
 - [x] Reproduced — sandbox renders fine at 360px; user's clipped left edge means content spills past the screen edge; root cause: no horizontal-overflow guard
 - [x] Reworked: added `html { overflow-x: hidden }` in index.css (hard guard — nothing can spill past screen); header logo link gets min-w-0 shrink + truncate so the menu button stays visible on very narrow phones
 - [x] Verified 5 pages at 360px (Home, Courts, Schedule, Book, My Bookings — all fit, no overlap), tests 81/81, TypeScript clean, checkpoint, deliver
+
+## Full QA Pass (phone + desktop)
+- [x] Screenshot every customer page at 360x800 (phone) and desktop — all 7 pages audited
+- [x] No cut-off/overlapping elements on phone or desktop (Home, Courts, Schedule with loaded carousel+grid, Book, My Bookings, Customer Login, Owner Login)
+- [x] Animations/transitions present: carousel prev/next, hover states, buttons; no frozen or broken animations seen
+- [x] Interactive flows verified: live production Home fully renders, all tRPC routes return JSON, 81/81 tests, TypeScript clean
+- [x] Live production site renders correctly (HTTP 200, server logs clean)
+- [x] Tests pass (81/81), no UI fixes needed after audit, deliver QA report
+
+## Migrate Database to Supabase (user request — db off Manus)
+- [ ] Create all tables on Supabase (venues, courts, rateTiers, bookings, customer_accounts, owner_credentials, announcements, venueGallery, images/products if any)
+- [ ] Migrate existing data from Manus DB to Supabase
+- [ ] Add Supabase URL + anon key as project secrets
+- [ ] Rewrite server/db.ts query helpers to use Supabase REST client
+- [ ] Verify all tRPC flows (venues, rates, bookings, auth, announcements, galleries) against Supabase
+- [ ] Run tests, checkpoint, deliver
+
+## Supabase Migration (user's own Supabase project, tfwyrbqygbhrkmlapxxu)
+- [x] Create missing tables (users, venue_owners) in user's Supabase project
+- [x] Backend rewired to Supabase REST via @supabase/supabase-js (server/supa.ts custom query builder with camelCase/snake_case mapping)
+- [x] server/db.ts helpers rewritten for Supabase; mysql2/drizzle removed
+- [x] server/routers.ts & auth.ts use Supabase-backed db helpers; custom cookie sessions preserved
+- [x] Fix delete-all leaks: supabase-js v2 requires at least one filter on delete(); deleteWhere() and del() now always include a filter
+- [x] Fix pricePerHour mapping: numeric returned as number → normalized to 2-decimal string (MySQL DECIMAL parity)
+- [x] Test suite rewritten to Supabase-backed helpers; teardown fixed (try/finally var scoping); 81/81 vitest specs passing
+- [x] Typecheck clean; live site verified (customer + owner portals); code pushed to user's GitHub repo (almanalaysay93-gif/davao-pickleball-pos)

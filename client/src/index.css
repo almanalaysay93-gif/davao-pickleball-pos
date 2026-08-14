@@ -53,6 +53,18 @@
   body {
     @apply bg-background text-foreground font-sans antialiased;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    background-image:
+      linear-gradient(rgba(255, 253, 245, 0.86), rgba(255, 253, 245, 0.86)),
+      url("./assets/pickleball-light-background.png");
+    background-attachment: fixed;
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: cover;
+  }
+  .dark body {
+    background-image:
+      linear-gradient(rgba(3, 13, 16, 0.78), rgba(3, 13, 16, 0.82)),
+      url("./assets/pickleball-dark-background.png");
   }
   h1, h2, h3, .font-display {
     font-family: var(--font-display);

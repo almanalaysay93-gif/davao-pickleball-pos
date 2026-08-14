@@ -316,7 +316,7 @@ class SDKServer {
       lastSignedIn: signedInAt,
     });
 
-    return user;
+    return { ...user, updatedAt: user.createdAt } as unknown as AuthenticatedUser;
   }
 }
 

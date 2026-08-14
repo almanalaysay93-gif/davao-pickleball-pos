@@ -1,15 +1,7 @@
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import type { Request } from "express";
-import mysql from "mysql2/promise";
-
-let _pool: mysql.Pool | null = null;
-function getPool(): mysql.Pool {
-  if (!_pool && process.env.DATABASE_URL) {
-    _pool = mysql.createPool(process.env.DATABASE_URL);
-  }
-  return _pool!;
-}
+import * as db from "./db";
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret";
 
@@ -52,11 +44,8 @@ export async function decodeSessionCookie(req: Request): Promise<AppUser | null>
     if (ownerToken) {
       const payload = jwt.verify(ownerToken, JWT_SECRET) as unknown as OwnerPayload;
       if (payload?.type === "owner" && payload.username) {
-        const [rows] = await getPool().query(
-          "SELECT id FROM ownerCredentials WHERE id = ?",
-          [payload.sub]
-        );
-        if ((rows as any[]).length > 0) {
+        const exists = await db.getOwnerCredentialById(payload.sub);
+        if (exists) {
           return {
             id: payload.sub,
             type: "owner",
@@ -73,11 +62,7 @@ export async function decodeSessionCookie(req: Request): Promise<AppUser | null>
     if (customerToken) {
       const payload = jwt.verify(customerToken, JWT_SECRET) as unknown as CustomerPayload;
       if (payload?.type === "customer") {
-        const [rows] = await getPool().query(
-          "SELECT id, email, name FROM customerAccounts WHERE id = ?",
-          [payload.accountId]
-        );
-        const row = (rows as any[])[0];
+        const row = await db.getCustomerAccountById(payload.accountId);
         if (row) {
           return {
             id: payload.accountId,

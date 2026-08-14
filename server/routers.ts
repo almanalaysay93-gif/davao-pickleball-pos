@@ -1,6 +1,5 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import mysql from "mysql2/promise";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router } from "./_core/trpc";
 import * as db from "./db";
@@ -30,16 +29,6 @@ const globalAdminProcedure = publicProcedure.use(({ ctx, next }) => {
   return next({ ctx });
 });
 
-let pool: mysql.Pool | null = null;
-function getAuthPool(): mysql.Pool {
-  if (!pool && process.env.DATABASE_URL) pool = mysql.createPool(process.env.DATABASE_URL);
-  return pool!;
-}
-
-/** Test accessor for the auth pool (used by vitest suites). */
-export function getAuthPoolForTests(): mysql.Pool {
-  return getAuthPool();
-}
 
 const adminProcedure = publicProcedure.use(({ ctx, next }) => {
   // The owner portal's fixed password login covers system admin duties.
@@ -137,7 +126,7 @@ async function createBookingInput(input: BookingInput): Promise<string> {
     input.startHour,
     input.endHour,
   );
-  if (conflict.length > 0) {
+  if (conflict) {
     throw new TRPCError({ code: "CONFLICT", message: "This slot is already booked" });
   }
 
@@ -174,11 +163,7 @@ export const appRouter = router({
     ownerLogin: publicProcedure
       .input(z.object({ username: z.string().min(1), password: z.string().min(1) }))
       .mutation(async ({ input, ctx }) => {
-        const [rows] = await getAuthPool().query(
-          "SELECT id, username, passwordHash, venueId FROM ownerCredentials WHERE username = ? LIMIT 1",
-          [input.username],
-        );
-        const row = (rows as any[])[0];
+        const row = await db.getOwnerCredentialByUsername(input.username);
         if (!row || !(await verifyPassword(input.password, row.passwordHash))) {
           throw new TRPCError({ code: "UNAUTHORIZED", message: "Invalid owner credentials" });
         }
@@ -202,19 +187,12 @@ export const appRouter = router({
         }),
       )
       .mutation(async ({ input, ctx }) => {
-        const [existing] = await getAuthPool().query(
-          "SELECT id FROM customerAccounts WHERE email = ?",
-          [input.email],
-        );
-        if ((existing as any[]).length > 0) {
+        const existing = await db.getCustomerAccountByEmail(input.email);
+        if (existing) {
           throw new TRPCError({ code: "CONFLICT", message: "An account with this email already exists" });
         }
         const hash = await hashPassword(input.password);
-        const [res] = await getAuthPool().query(
-          "INSERT INTO customerAccounts (email, name, passwordHash) VALUES (?, ?, ?)",
-          [input.email, input.name ?? null, hash],
-        );
-        const accountId = (res as any).insertId;
+        const accountId = await db.insertCustomerAccount({ email: input.email, name: input.name ?? null, passwordHash: hash });
         setCustomerCookie(ctx.res, accountId, input.email);
         return { success: true, accountId } as const;
       }),
@@ -223,11 +201,7 @@ export const appRouter = router({
     customerLogin: publicProcedure
       .input(z.object({ email: z.string().email().toLowerCase(), password: z.string().min(1) }))
       .mutation(async ({ input, ctx }) => {
-        const [rows] = await getAuthPool().query(
-          "SELECT id, email, name, passwordHash FROM customerAccounts WHERE email = ? LIMIT 1",
-          [input.email],
-        );
-        const row = (rows as any[])[0];
+        const row = await db.getCustomerAccountByEmail(input.email);
         if (!row || !(await verifyPassword(input.password, row.passwordHash))) {
           throw new TRPCError({ code: "UNAUTHORIZED", message: "Invalid email or password" });
         }
@@ -309,18 +283,10 @@ export const appRouter = router({
         // The username is the venue name; master login conflict is impossible because
         // venues.create is already blocked from using the name "owner" (duplicate name guard).
         const username = input.name.toLowerCase();
-        const [existing] = await getAuthPool().query(
-          "SELECT id FROM ownerCredentials WHERE username = ? LIMIT 1",
-          [username],
-        );
         let ownerAccountId: number | null = null;
-        if ((existing as any[]).length === 0) {
+        if (!(await db.getOwnerCredentialByUsername(username))) {
           const hash = await hashPassword("Davao2026!");
-          const [res] = await getAuthPool().query(
-            "INSERT INTO ownerCredentials (username, passwordHash, venueId) VALUES (?, ?, ?)",
-            [username, hash, created.venueId],
-          );
-          ownerAccountId = (res as any).insertId;
+          ownerAccountId = await db.insertOwnerCredential({ username, passwordHash: hash, venueId: created.venueId });
         }
         return { ...created, ownerAccount: ownerAccountId ? { username, password: "Davao2026!" } : null };
       }),
@@ -484,7 +450,7 @@ export const appRouter = router({
           const startHour = patch.startHour ?? booking.startHour;
           const endHour = patch.endHour ?? booking.endHour;
           const conflict = await db.findConflictingBooking(booking.venueId, courtId, playerDate, startHour, endHour, id);
-          if (conflict.length > 0) {
+          if (conflict) {
             throw new TRPCError({ code: "CONFLICT", message: "The new slot is already booked" });
           }
         }
@@ -607,7 +573,9 @@ export const appRouter = router({
       // Venue-specific owner logins see only their venue; the global owner
       // account ("owner") manages all venues system-wide.
       if (ctx.ownsAllVenues) return db.listVenues();
-      const venue = await db.getVenueById(ctx.ownedVenueIds[0]);
+      const venueIds = (ctx.ownedVenueIds as number[]) || [];
+      if (venueIds.length === 0) return [];
+      const venue = await db.getVenueById(venueIds[0]);
       return venue ? [venue] : [];
     }),
 
@@ -859,14 +827,12 @@ export const appRouter = router({
 
     /** Admin-only (global master only): list all owner credential accounts. */
     ownerAccounts: globalAdminProcedure.query(async () => {
-      const [rows] = await getAuthPool().query(
-        "SELECT id, username, venueId, createdAt FROM ownerCredentials ORDER BY id ASC",
-      );
-      const list = (rows as any[]).map((r) => ({
+      const rows = await db.listAllOwnerCredentials();
+      const list = rows.map(r => ({
         id: Number(r.id),
         username: String(r.username),
         venueId: r.venueId != null ? Number(r.venueId) : null,
-        createdAt: new Date(r.createdAt),
+        createdAt: new Date(r.createdAt as string),
       }));
       // Attach venue names for display.
       const venues = await db.listVenues();
@@ -887,11 +853,7 @@ export const appRouter = router({
         if (username === "owner") {
           throw new TRPCError({ code: "CONFLICT", message: "This username is reserved for the master admin account" });
         }
-        const [existing] = await getAuthPool().query(
-          "SELECT id FROM ownerCredentials WHERE username = ? LIMIT 1",
-          [username],
-        );
-        if ((existing as any[]).length > 0) {
+        if (await db.getOwnerCredentialByUsername(username)) {
           throw new TRPCError({ code: "CONFLICT", message: "An owner account with this username already exists" });
         }
         if (input.venueId != null) {
@@ -899,29 +861,19 @@ export const appRouter = router({
           if (!venue) throw new TRPCError({ code: "NOT_FOUND", message: "Venue not found" });
         }
         const hash = await hashPassword(input.password);
-        const [res] = await getAuthPool().query(
-          "INSERT INTO ownerCredentials (username, passwordHash, venueId) VALUES (?, ?, ?)",
-          [username, hash, input.venueId ?? null],
-        );
-        return { success: true, id: (res as any).insertId } as const;
+        const id = await db.insertOwnerCredential({ username, passwordHash: hash, venueId: input.venueId ?? null });
+        return { success: true, id } as const;
       }),
 
     /** Admin-only (global master only): change an owner account's password. */
     setOwnerAccountPassword: globalAdminProcedure
       .input(z.object({ id: z.number().int().positive(), password: z.string().min(8).max(128) }))
       .mutation(async ({ input }) => {
-        const [existing] = await getAuthPool().query(
-          "SELECT id FROM ownerCredentials WHERE id = ? LIMIT 1",
-          [input.id],
-        );
-        if ((existing as any[]).length === 0) {
+        if (!(await db.getOwnerCredentialById(input.id))) {
           throw new TRPCError({ code: "NOT_FOUND", message: "Owner account not found" });
         }
         const hash = await hashPassword(input.password);
-        await getAuthPool().query("UPDATE ownerCredentials SET passwordHash = ? WHERE id = ?", [
-          hash,
-          input.id,
-        ]);
+        await db.updateOwnerCredential(input.id, { passwordHash: hash });
         return { success: true } as const;
       }),
 
@@ -929,11 +881,7 @@ export const appRouter = router({
     setOwnerAccountVenue: globalAdminProcedure
       .input(z.object({ id: z.number().int().positive(), venueId: z.number().int().positive().nullish() }))
       .mutation(async ({ input }) => {
-        const [existing] = await getAuthPool().query(
-          "SELECT id, username FROM ownerCredentials WHERE id = ? LIMIT 1",
-          [input.id],
-        );
-        const row = (existing as any[])[0];
+        const row = await db.getOwnerCredentialById(input.id);
         if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Owner account not found" });
         if (String(row.username).toLowerCase() === "owner" && input.venueId != null) {
           throw new TRPCError({ code: "FORBIDDEN", message: "The master admin account cannot be bound to a single venue" });
@@ -942,10 +890,7 @@ export const appRouter = router({
           const venue = await db.getVenueById(input.venueId);
           if (!venue) throw new TRPCError({ code: "NOT_FOUND", message: "Venue not found" });
         }
-        await getAuthPool().query("UPDATE ownerCredentials SET venueId = ? WHERE id = ?", [
-          input.venueId ?? null,
-          input.id,
-        ]);
+        await db.updateOwnerCredential(input.id, { venueId: input.venueId ?? null });
         return { success: true } as const;
       }),
 
@@ -953,16 +898,12 @@ export const appRouter = router({
     deleteOwnerAccount: globalAdminProcedure
       .input(z.object({ id: z.number().int().positive() }))
       .mutation(async ({ input }) => {
-        const [existing] = await getAuthPool().query(
-          "SELECT id, username FROM ownerCredentials WHERE id = ? LIMIT 1",
-          [input.id],
-        );
-        const row = (existing as any[])[0];
+        const row = await db.getOwnerCredentialById(input.id);
         if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Owner account not found" });
         if (String(row.username).toLowerCase() === "owner") {
           throw new TRPCError({ code: "FORBIDDEN", message: "The master admin account cannot be deleted" });
         }
-        await getAuthPool().query("DELETE FROM ownerCredentials WHERE id = ?", [input.id]);
+        await db.deleteOwnerCredential(input.id);
         return { success: true } as const;
       }),
   }),

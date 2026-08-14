@@ -1,10 +1,24 @@
 import { describe, expect, it, vi, beforeEach, afterEach, afterAll } from "vitest";
-import { appRouter, getAuthPoolForTests } from "./routers";
+import { appRouter } from "./routers";
 import type { TrpcContext } from "./_core/context";
-import { announcements as announcementsTable, bookings as bookingsTable, courts as courtsTable, venueOwners, customerAccounts } from "../drizzle/schema";
 import { verifyPassword } from "./auth";
-import { and, desc, eq, sql } from "drizzle-orm";
-import { getDb, getUserByEmail, upsertUser, listVenues } from "./db";
+import {
+  getUserByEmail,
+  upsertUser,
+  listVenues,
+  deleteBookingsByDate,
+  deleteBookingsByReferencePattern,
+  deleteBookingsById,
+  deleteAnnouncementsAll,
+  deleteAnnouncementsByVenue,
+  deleteCourtsByNumber,
+  deleteVenueOwnersAll,
+  deleteOwnerCredentialsByPattern,
+  deleteVenuesByNamePattern,
+  deleteCustomerAccountsByEmail,
+  deleteUserByOpenId,
+} from "./db";
+import { deleteWhere, q } from "./supa";
 import * as db from "./db";
 
 // ---------------------------------------------------------------
@@ -219,8 +233,7 @@ describe("bookings.create + conflict detection", () => {
   it("creates a booking and rejects a conflicting one", async () => {
     vi.useFakeTimers({ now: new Date("2026-09-01T12:00:00Z") });
     const day = `2026-12-25`; // isolated future date
-    const rawDb = await getDb();
-    if (rawDb) await rawDb.delete(venueOwners).where(sql`1 = 1`).catch(() => undefined);
+    await deleteVenueOwnersAll().catch(() => undefined);
     try {
       // Ensure the target court is unbooked at the start of this test.
       const caller = appRouter.createCaller(guestCtx());
@@ -228,10 +241,7 @@ describe("bookings.create + conflict detection", () => {
       const arena = venues.find(v => v.name === "Arena Athletics")!;
       const courts = await caller.courts.byVenue({ venueId: arena.id });
       const court = courts.find(c => c.status === "available")!;
-      const rawDb = await getDb();
-      if (rawDb) {
-        await rawDb.delete(bookingsTable).where(and(eq(bookingsTable.venueId, arena.id), eq(bookingsTable.courtId, court.id), eq(bookingsTable.playerDate, day)));
-      }
+      await deleteBookingsByDate(day).catch(() => undefined);
 
       const ref = await caller.bookings.create({
         venueId: arena.id,
@@ -272,11 +282,8 @@ describe("bookings.create + conflict detection", () => {
       expect(ref2.reference).toBeTruthy();
     } finally {
       vi.useRealTimers();
-      const rawDb = await getDb();
-      if (rawDb) {
-        await rawDb.delete(bookingsTable).where(eq(bookingsTable.playerDate, day)).catch(() => undefined);
-        await rawDb.delete(venueOwners).where(sql`1 = 1`).catch(() => undefined);
-      }
+      await deleteBookingsByDate(day).catch(() => undefined);
+      await deleteVenueOwnersAll().catch(() => undefined);
     }
   });
 
@@ -336,13 +343,7 @@ describe("admin authorization", () => {
       expect(after.find(b => b.id === target.id)?.paymentStatus).toBe("cancelled");
     } finally {
       vi.useRealTimers();
-      const rawDb = await getDb();
-      if (rawDb) {
-        await rawDb
-          .delete(bookingsTable)
-          .where(and(eq(bookingsTable.playerDate, "2026-09-05"), eq(bookingsTable.playerName, "Cancel Me")))
-          .catch(() => undefined);
-      }
+      await deleteBookingsByDate("2026-09-05").catch(() => undefined);
     }
   });
 
@@ -391,20 +392,19 @@ describe("dual-role: player & owner routers", () => {
     "isolates two owners: each sees only their own venue's bookings",
     async () => {
       vi.useFakeTimers({ now: new Date("2026-09-01T12:00:00Z") });
+    let email1 = "";
+    let email2 = "";
     const day = "2026-12-24"; // isolated date (conflict test uses 2026-12-25)
-    const rawDb = await getDb();
-    if (rawDb) {
-      await rawDb.delete(bookingsTable).where(eq(bookingsTable.playerDate, day));
-      await rawDb.delete(venueOwners).where(sql`1 = 1`);
-    }
+    await deleteBookingsByDate(day).catch(() => undefined);
+    await deleteVenueOwnersAll().catch(() => undefined);
     try {
       const adminCaller = appRouter.createCaller(adminCtx());
       const venueRows = await listVenues();
       // Two venues, two owners.
       const v1 = venueRows.find(v => v.name === "Arena Athletics")!;
       const v2 = venueRows.find(v => v.name !== "Arena Athletics")!;
-      const email1 = `owner-a-${Date.now()}@example.com`;
-      const email2 = `owner-b-${Date.now()}@example.com`;
+      email1 = `owner-a-${Date.now()}@example.com`;
+      email2 = `owner-b-${Date.now()}@example.com`;
       await upsertUser({ openId: `test-${email1}`, email: email1, role: "user" });
       await upsertUser({ openId: `test-${email2}`, email: email2, role: "user" });
       await adminCaller.admin.grantOwnership({ venueId: v1.id, email: email1 });
@@ -458,11 +458,10 @@ describe("dual-role: player & owner routers", () => {
       expect(b1.length).toBe(0);
     } finally {
       vi.useRealTimers();
-      const dbNow = await getDb();
-      if (dbNow) {
-        await dbNow.delete(bookingsTable).where(eq(bookingsTable.playerDate, day));
-        await dbNow.delete(venueOwners).where(sql`1 = 1`);
-      }
+      await deleteBookingsByDate(day).catch(() => undefined);
+      await deleteVenueOwnersAll().catch(() => undefined);
+      await deleteUserByOpenId(`test-${email1}`).catch(() => undefined);
+      await deleteUserByOpenId(`test-${email2}`).catch(() => undefined);
     }
   },
   30000,
@@ -514,10 +513,8 @@ describe("dual-role: player & owner routers", () => {
     } finally {
       vi.useRealTimers();
       // Cleanup
-      const rawDb = await getDb();
-      if (rawDb) {
-        await rawDb.delete(venueOwners).where(sql`1 = 1`);
-      }
+      await deleteVenueOwnersAll().catch(() => undefined);
+      await deleteUserByOpenId(`test-${email}`).catch(() => undefined);
     }
   });
 });
@@ -563,16 +560,13 @@ describe("announcements & owner booking", () => {
       });
       expect(created.success).toBe(true);
       // Confirm the row landed in the database.
-      const rawDb = await getDb();
-      const createdRow = await rawDb
-        .select()
-        .from(announcementsTable)
-        .where(
-          and(eq(announcementsTable.venueId, arena.id), eq(announcementsTable.title, "Courts closed today")),
-        )
-        .limit(1);
-      expect(createdRow.length).toBe(1);
-      const annId = createdRow[0].id;
+      const createdRows = (await q("announcements")
+        .eq("venue_id", arena.id)
+        .eq("title", "Courts closed today")
+        .limit(1)
+        .exec()) as Array<{ id: number }>;
+      expect(createdRows.length).toBe(1);
+      const annId = createdRows[0].id;
 
       // Players see active announcements publicly
       const list = await appRouter.createCaller(guestCtx()).announcements.list();
@@ -589,11 +583,9 @@ describe("announcements & owner booking", () => {
       expect(list3.every((a: any) => a.title !== "Courts closed today")).toBe(true);
     } finally {
       vi.useRealTimers();
-      const rawDb = await getDb();
-      if (rawDb) {
-        await rawDb.delete(venueOwners).where(sql`1 = 1`).catch(() => undefined);
-        await rawDb.delete(announcementsTable).where(sql`1 = 1`).catch(() => undefined);
-      }
+      await deleteVenueOwnersAll().catch(() => undefined);
+      await deleteAnnouncementsAll().catch(() => undefined);
+      await deleteUserByOpenId(`test-${email}`).catch(() => undefined);
     }
   }, 30000);
 
@@ -633,12 +625,10 @@ describe("announcements & owner booking", () => {
         expireAt: new Date("2026-08-02T12:00:00Z").toISOString(),
       });
       expect(futCreated.success).toBe(true);
-      const rawDb = await getDb();
-      const rows = await rawDb
-        .select()
-        .from(announcementsTable)
-        .where(eq(announcementsTable.venueId, arena.id))
-        .orderBy(desc(announcementsTable.id));
+      const rows = (await q("announcements")
+        .eq("venue_id", arena.id)
+        .order("id", { ascending: false })
+        .exec()) as Array<{ id: number; title: string }>;
       const oldRow = rows.find(r => r.title === "Old notice")!;
       const futRow = rows.find(r => r.title === "Future notice")!;
 
@@ -649,21 +639,16 @@ describe("announcements & owner booking", () => {
       await ownerCaller.owner.deleteAnnouncement({ id: futRow.id });
     } finally {
       vi.useRealTimers();
-      const rawDb = await getDb();
-      if (rawDb) {
-        await rawDb.delete(venueOwners).where(sql`1 = 1`).catch(() => undefined);
-        await rawDb.delete(announcementsTable).where(sql`1 = 1`).catch(() => undefined);
-      }
+      await deleteVenueOwnersAll().catch(() => undefined);
+      await deleteAnnouncementsAll().catch(() => undefined);
+      await deleteUserByOpenId(`test-${email}`).catch(() => undefined);
     }
   }, 30000);
 
   it("owner.createBooking books at owned venues and rejects non-owned ones", async () => {
     vi.useFakeTimers({ now: new Date("2026-09-01T12:00:00Z") });
     const email = `owner-book-${Date.now()}@example.com`;
-    const rawDb = await getDb();
-    if (rawDb) {
-      await rawDb.delete(venueOwners).where(sql`1 = 1`).catch(() => undefined);
-    }
+    await deleteVenueOwnersAll().catch(() => undefined);
     try {
       await upsertUser({ openId: `test-${email}`, email, role: "user" });
       const seeded = await getUserByEmail(email);
@@ -693,10 +678,7 @@ describe("announcements & owner booking", () => {
       // Booking at an owned venue succeeds
       const courts = await ownerCaller.owner.courtsForVenue({ venueId: arena.id });
       const court = courts.find(c => c.status === "available")!;
-      await rawDb
-        .delete(bookingsTable)
-        .where(eq(bookingsTable.playerDate, "2027-03-01"))
-        .catch(() => undefined);
+      await deleteBookingsByDate("2027-03-01").catch(() => undefined);
 
       const res = await ownerCaller.owner.createBooking({
         venueId: arena.id,
@@ -743,11 +725,10 @@ describe("announcements & owner booking", () => {
       ).rejects.toThrow();
     } finally {
       vi.useRealTimers();
-      const rawDb2 = await getDb();
-      if (rawDb2) {
-        await rawDb2.delete(bookingsTable).where(eq(bookingsTable.playerDate, "2027-03-01")).catch(() => undefined);
-        await rawDb2.delete(venueOwners).where(sql`1 = 1`).catch(() => undefined);
-      }
+      await deleteBookingsByDate("2027-03-01").catch(() => undefined);
+      await deleteBookingsByDate("2027-03-02").catch(() => undefined);
+      await deleteVenueOwnersAll().catch(() => undefined);
+      await deleteUserByOpenId(`test-${email}`).catch(() => undefined);
     }
   }, 60000);
 });
@@ -792,8 +773,7 @@ describe(
       expect(afterRemove.map(c => c.id)).not.toContain(added.id);
     } finally {
       vi.useRealTimers();
-      const rawDb = await getDb();
-      if (rawDb) await rawDb.delete(courtsTable).where(eq(courtsTable.courtNumber, "Court 99")).catch(() => undefined);
+      await deleteCourtsByNumber("Court 99").catch(() => undefined);
     }
   },
   15000,
@@ -840,11 +820,9 @@ describe(
       expect(afterRemove.map(c => c.id)).not.toContain(added.id);
     } finally {
       vi.useRealTimers();
-      const rawDb = await getDb();
-      if (rawDb) {
-        await rawDb.delete(venueOwners).where(sql`1 = 1`).catch(() => undefined);
-        await rawDb.delete(courtsTable).where(eq(courtsTable.courtNumber, "Court 99")).catch(() => undefined);
-      }
+      await deleteVenueOwnersAll().catch(() => undefined);
+      await deleteCourtsByNumber("Court 99").catch(() => undefined);
+      await deleteUserByOpenId(`test-${email}`).catch(() => undefined);
     }
   },
   15000,
@@ -868,11 +846,11 @@ describe(
       await ownerCaller.owner.createCourt({ venueId: arena.id, courtNumber: "Court 99" });
       const courts = await ownerCaller.owner.courtsForVenue({ venueId: arena.id });
       const added = courts.find(c => c.courtNumber === "Court 99")!;
-      const tomorrow = "2026-09-02";
+    var dayForCourtRemovalTest = "2026-09-02";
       await ownerCaller.owner.createBooking({
         venueId: arena.id,
         courtId: added.id,
-        playerDate: tomorrow,
+        playerDate: dayForCourtRemovalTest,
         startHour: "19:00",
         endHour: "21:00",
         playerName: "Test Player",
@@ -892,24 +870,18 @@ describe(
       expect(booking).toBeDefined();
       // Cancel the booking through the owner portal, then verify removal now
       // succeeds because cancelled bookings no longer block court removal.
-      const rawDb = await getDb();
       // updateBookingStatus marks the booking cancelled (the owner.list filter
       // already hides it, but the guard must also skip cancelled rows).
-      await rawDb
-        ?.update(bookingsTable)
-        .set({ paymentStatus: "cancelled" })
-        .where(eq(bookingsTable.id, booking!.booking.id));
+      await db.updateBookingStatus(booking!.booking.id, { paymentStatus: "cancelled" });
       await ownerCaller.owner.removeCourt({ courtId: added.id });
       const afterRemove = await ownerCaller.owner.courtsForVenue({ venueId: arena.id });
       expect(afterRemove.map(c => c.id)).not.toContain(added.id);
     } finally {
       vi.useRealTimers();
-      const rawDb = await getDb();
-      if (rawDb) {
-        await rawDb.delete(bookingsTable).where(sql`1 = 1`);
-        await rawDb.delete(venueOwners).where(sql`1 = 1`);
-        await rawDb.delete(courtsTable).where(eq(courtsTable.courtNumber, "Court 99"));
-      }
+      await deleteBookingsByDate(dayForCourtRemovalTest).catch(() => undefined);
+      await deleteVenueOwnersAll().catch(() => undefined);
+      await deleteCourtsByNumber("Court 99").catch(() => undefined);
+      await deleteUserByOpenId(`test-${email}`).catch(() => undefined);
     }
   },
   30000,
@@ -957,12 +929,7 @@ describe("customer signup/login (optional accounts)", () => {
   const password = "StrongPass1!";
 
   afterEach(async () => {
-    const db = await getDb();
-    if (db) {
-      await db
-        .delete(customerAccounts)
-        .where(eq(customerAccounts.email, email));
-    }
+    await deleteCustomerAccountsByEmail(email);
   });
 
   it("creates a customer account and sets a session", async () => {
@@ -1006,19 +973,15 @@ describe("customer signup/login (optional accounts)", () => {
     // confirms the account was created and the session code path ran).
     const c1 = appRouter.createCaller(guestCtx());
     await c1.auth.signup({ email, name: "Test Customer", password });
-    const db = await getDb();
-    const rows = await db!.select().from(customerAccounts).where(eq(customerAccounts.email, email)).limit(1);
-    const account = rows[0];
+    const account = await db.getCustomerAccountByEmail(email);
     expect(account).toBeTruthy();
-    expect(account.email).toBe(email);
+    expect(account?.email).toBe(email);
   });
 });
 
 describe("payment status in bookings", () => {
   async function getBookingByRef(reference: string) {
-    const db = await getDb();
-    const rows = await db!.select().from(bookingsTable).where(eq(bookingsTable.reference, reference)).limit(1);
-    return rows[0];
+    return db.getBookingByReference(reference);
   }
 
   it("marks an online booking with a payment method as paid immediately", async () => {
@@ -1102,8 +1065,7 @@ describe("payment status in bookings", () => {
 });
 
 async function dbCleanup(id: number) {
-  const db = await getDb();
-  if (db) await db.delete(bookingsTable).where(eq(bookingsTable.id, id));
+  await deleteBookingsById(id);
 }
 
 // ---------------------------------------------------------------
@@ -1152,8 +1114,7 @@ describe("per-venue owner logins", () => {
   it("allows a venue-specific owner to manage bookings at their venue only", async () => {
     vi.useFakeTimers({ now: new Date("2026-09-01T12:00:00Z") });
     const day = "2026-12-20";
-    const rawDb = await getDb();
-    if (rawDb) await rawDb.delete(bookingsTable).where(eq(bookingsTable.playerDate, day));
+    await deleteBookingsByDate(day).catch(() => undefined);
     try {
       const scopedCaller = appRouter.createCaller(
         baseCtx({
@@ -1216,8 +1177,7 @@ describe("per-venue owner logins", () => {
       ).rejects.toThrow(/do not own/i);
     } finally {
       vi.useRealTimers();
-      const dbNow = await getDb();
-      if (dbNow) await dbNow.delete(bookingsTable).where(eq(bookingsTable.playerDate, day));
+      await deleteBookingsByDate(day).catch(() => undefined);
     }
   });
 
@@ -1258,15 +1218,13 @@ describe("admin.ownerAccounts — master control of owner logins", () => {
 
   beforeEach(async () => {
     // Ensure the global master account exists (seeded) before running.
-    const [rows] = await getAuthPoolForTests().query(
-      "SELECT id FROM ownerCredentials WHERE username = 'owner' LIMIT 1",
-    );
-    masterId = (rows as any[])[0]?.id ?? null;
+    const master = await db.getOwnerCredentialByUsername("owner");
+    masterId = master?.id ?? null;
   });
 
   afterEach(async () => {
     if (masterId !== null) {
-      await getAuthPoolForTests().query("DELETE FROM ownerCredentials WHERE username LIKE 'test-owner-%'");
+      await deleteOwnerCredentialsByPattern("test-owner-%");
     }
   });
 
@@ -1312,11 +1270,8 @@ describe("admin.ownerAccounts — master control of owner logins", () => {
     // The new account signs in as CrisRon venue owner.
     await caller.auth.ownerLogin({ username: "test-owner-alpha", password: "StrongPass1!" });
     // Verify payload: login must succeed without throwing.
-    const [rows] = await getAuthPoolForTests().query(
-      "SELECT username, venueId FROM ownerCredentials WHERE username = 'test-owner-alpha' LIMIT 1",
-    );
-    const row = (rows as any[])[0];
-    expect(row.venueId).toBe(5);
+    const row = await db.getOwnerCredentialByUsername("test-owner-alpha");
+    expect(row?.venueId).toBe(5);
   });
 
   it("rejects duplicate usernames and the reserved master name", async () => {
@@ -1333,10 +1288,7 @@ describe("admin.ownerAccounts — master control of owner logins", () => {
   it("changes a password and allows login with the new one", async () => {
     const caller = appRouter.createCaller(adminCtx());
     await caller.admin.createOwnerAccount({ username: "Test-Owner-Pw", password: "Original1!" });
-    const [rows] = await getAuthPoolForTests().query(
-      "SELECT id FROM ownerCredentials WHERE username = 'test-owner-pw' LIMIT 1",
-    );
-    const id = (rows as any[])[0].id;
+    const id = (await db.getOwnerCredentialByUsername("test-owner-pw"))!.id;
     await caller.admin.setOwnerAccountPassword({ id, password: "Updated2!" });
     // New password signs in; old one no longer does.
     await caller.auth.ownerLogin({ username: "test-owner-pw", password: "Updated2!" });
@@ -1355,17 +1307,11 @@ describe("admin.ownerAccounts — master control of owner logins", () => {
   it("reassigns scope and promotes a venue owner to global", async () => {
     const caller = appRouter.createCaller(adminCtx());
     await caller.admin.createOwnerAccount({ username: "Test-Owner-Scope", password: "StrongPass3!" });
-    const [rows] = await getAuthPoolForTests().query(
-      "SELECT id FROM ownerCredentials WHERE username = 'test-owner-scope' LIMIT 1",
-    );
-    const id = (rows as any[])[0].id;
+    const id = (await db.getOwnerCredentialByUsername("test-owner-scope"))!.id;
     await caller.admin.setOwnerAccountVenue({ id, venueId: 2 });
     await caller.admin.setOwnerAccountVenue({ id, venueId: null });
-    const [after] = await getAuthPoolForTests().query(
-      "SELECT venueId FROM ownerCredentials WHERE id = ? LIMIT 1",
-      [id],
-    );
-    expect((after as any[])[0].venueId).toBeNull();
+    const after = await db.getOwnerCredentialById(id);
+    expect(after?.venueId).toBeNull();
   });
 
   it("cannot bind or delete the master admin account", async () => {
@@ -1382,10 +1328,7 @@ describe("admin.ownerAccounts — master control of owner logins", () => {
   it("deletes a venue owner account and revokes login", async () => {
     const caller = appRouter.createCaller(adminCtx());
     await caller.admin.createOwnerAccount({ username: "Test-Owner-Del", password: "StrongPass4!" });
-    const [rows] = await getAuthPoolForTests().query(
-      "SELECT id FROM ownerCredentials WHERE username = 'test-owner-del' LIMIT 1",
-    );
-    const id = (rows as any[])[0].id;
+    const id = (await db.getOwnerCredentialByUsername("test-owner-del"))!.id;
     await caller.admin.deleteOwnerAccount({ id });
     await expect(
       caller.auth.ownerLogin({ username: "test-owner-del", password: "StrongPass4!" }),
@@ -1407,8 +1350,7 @@ describe("venue management (master admin)", () => {
   }
 
   afterAll(async () => {
-    const db = await getAuthPoolForTests();
-    await db.query("DELETE FROM venues WHERE name LIKE 'Test Venue%'");
+    await deleteVenuesByNamePattern("Test Venue%").catch(() => undefined);
   });
 
   it("allows master admin to create a venue with courts and rates", async () => {
@@ -1534,21 +1476,33 @@ describe("venue management (master admin)", () => {
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     const date = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, "0")}-${String(tomorrow.getDate()).padStart(2, "0")}`;
-    const pool = await getAuthPoolForTests();
-    await pool.query(
-      "INSERT INTO bookings (reference, courtId, venueId, playerDate, startHour, endHour, playerName, paymentStatus, paymentMethod, dayAmount, nightAmount, totalAmount) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      ["TEST-DEL-1", court.id, venueId, date, "10:00", "11:00", "Test Player", "paid", "cash", "100", "0", "100"],
-    );
+    await db.insertBooking({
+      reference: "TEST-DEL-1",
+      courtId: court.id,
+      venueId,
+      playerDate: date,
+      startHour: "10:00",
+      endHour: "11:00",
+      playerName: "Test Player",
+      contact: null,
+      channel: "online",
+      paymentStatus: "paid",
+      paymentMethod: "cash",
+      dayAmount: "100.00",
+      nightAmount: "0.00",
+      totalAmount: "100.00",
+    });
 
     // Removal blocked while a paid future booking exists.
     await expect(caller.venues.delete({ venueId })).rejects.toThrow(/upcoming bookings/i);
 
     // Cancel the booking, then removal succeeds and cleans up everything.
-    await pool.query("UPDATE bookings SET paymentStatus = 'cancelled' WHERE reference = 'TEST-DEL-1'");
+    const booked = await db.getBookingByReference("TEST-DEL-1");
+    if (booked) await db.updateBookingStatus(booked.id, { paymentStatus: "cancelled" });
     const delRes = await caller.venues.delete({ venueId });
     expect(delRes.success).toBe(true);
-    const [credRows] = await pool.query("SELECT id FROM ownerCredentials WHERE venueId = ?", [venueId]);
-    expect((credRows as any[]).length).toBe(0);
+    const credRows = await db.getOwnerCredentialsByVenue(venueId);
+    expect((credRows ?? []).length).toBe(0);
     const courtsAfter = await db.listCourtsByVenue(venueId);
     expect(courtsAfter.length).toBe(0);
     const ratesAfter = await db.listRateTiersByVenue(venueId);
@@ -1584,8 +1538,7 @@ describe("venue management RBAC (update/delete denial)", () => {
   }
 
   afterAll(async () => {
-    const db = await getAuthPoolForTests();
-    await db.query("DELETE FROM venues WHERE name LIKE 'Test Venue%'");
+    await deleteVenuesByNamePattern("Test Venue%").catch(() => undefined);
   });
 
   it("denies venues.update to a venue-bound owner", async () => {
@@ -1637,9 +1590,8 @@ describe("auto owner account on venue creation", () => {
   }
 
   afterAll(async () => {
-    const db = await getAuthPoolForTests();
-    await db.query("DELETE FROM ownerCredentials WHERE username LIKE 'test venue%'");
-    await db.query("DELETE FROM venues WHERE name LIKE 'Test Venue%'");
+    await deleteOwnerCredentialsByPattern("test venue%").catch(() => undefined);
+    await deleteVenuesByNamePattern("Test Venue%").catch(() => undefined);
   });
 
   it("auto-creates an owner login (username = venue name, password Davao2026!) when a venue is added", async () => {
@@ -1654,13 +1606,10 @@ describe("auto owner account on venue creation", () => {
     expect(res.venueId).toBeGreaterThan(0);
     expect(res.ownerAccount?.username).toBe("test venue hotel");
     expect(res.ownerAccount?.password).toBe("Davao2026!");
-    const [rows] = await getAuthPoolForTests().query(
-      "SELECT username, passwordHash, venueId FROM ownerCredentials WHERE username = 'test venue hotel' LIMIT 1",
-    );
-    const row = (rows as any[])[0];
+    const row = await db.getOwnerCredentialByUsername("test venue hotel");
     expect(row).toBeTruthy();
-    expect(row.venueId).toBe(res.venueId);
-    const ok = await verifyPassword("Davao2026!", row.passwordHash);
+    expect(row?.venueId).toBe(res.venueId);
+    const ok = await verifyPassword("Davao2026!", row!.passwordHash);
     expect(ok).toBe(true);
     // And the auto-created account can actually sign in as the venue owner.
     await caller.auth.ownerLogin({ username: "test venue hotel", password: "Davao2026!" });

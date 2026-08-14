@@ -1,0 +1,13 @@
+import mysql from "mysql2/promise";
+const p = await mysql.createConnection(process.env.DATABASE_URL);
+const [v] = await p.query("SELECT id FROM venues");
+console.log("venue ids:", v.map(r => r.id).join(","));
+const [c] = await p.query("SELECT venueId, COUNT(*) n FROM courts WHERE venueId IN (?) GROUP BY venueId", [v.map(r => r.id)]);
+console.log("courts per venue:", JSON.stringify(c));
+const [r] = await p.query("SELECT venueId, COUNT(*) n FROM rateTiers WHERE venueId IN (?) GROUP BY venueId", [v.map(r => r.id)]);
+console.log("rateTiers per venue:", JSON.stringify(r));
+const [b] = await p.query("SELECT COUNT(*) n FROM bookings WHERE venueId IN (?)", [v.map(r => r.id)]);
+console.log("bookings:", JSON.stringify(b));
+const [g] = await p.query("SELECT COUNT(*) n FROM venueGallery WHERE venueId IN (?)", [v.map(r => r.id)]);
+console.log("gallery:", JSON.stringify(g));
+await p.end();
