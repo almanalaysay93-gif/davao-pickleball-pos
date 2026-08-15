@@ -13,6 +13,7 @@ import Schedule from "./pages/Schedule";
 import Book from "./pages/Book";
 import Checkout from "./pages/Checkout";
 import Confirmation from "./pages/Confirmation";
+import BookingPolicy from "./pages/BookingPolicy";
 import Admin from "./pages/Admin";
 import MyBookings from "./pages/MyBookings";
 import Owner from "./pages/Owner";
@@ -31,6 +32,7 @@ function CustomerApp() {
         <Route path={"/checkout"} component={Checkout} />
         <Route path={"/confirmation/:reference"} component={Confirmation} />
         <Route path={"/my-bookings"} component={MyBookings} />
+        <Route path={"/booking-policy"} component={BookingPolicy} />
         <Route path={"/customer-login"} component={CustomerLogin} />
         <Route path={"/owner"}>{() => <Redirect to={"/owner-app"} />}</Route>
         <Route path={"/admin"}>{() => <Redirect to={"/owner-app/admin"} />}</Route>

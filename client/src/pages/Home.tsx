@@ -13,7 +13,9 @@ import {
   Users,
 } from "lucide-react";
 import { Link } from "wouter";
+import { useMemo } from "react";
 import { trpc } from "@/lib/trpc";
+import { usePageMeta, type JsonLdItem } from "@/lib/meta";
 import { AnnouncementsBanner } from "@/components/AnnouncementsBanner";
 import { VenueLocationMap, VenueGalleryHero } from "@/components/VenueLocation";
 
@@ -50,6 +52,32 @@ export default function Home() {
   });
   const { data: rates } = trpc.rates.all.useQuery(undefined, {
     refetchOnWindowFocus: false,
+  });
+
+  // JSON-LD LocalBusiness items for the venue directory (schema.org ItemList)
+  const venueJsonLd: JsonLdItem[] = useMemo(
+    () =>
+      (venues ?? []).map(v => ({
+        "@type": "SportsActivityLocation",
+        name: v.name,
+        address: {
+          "@type": "PostalAddress",
+          streetAddress: v.address,
+          addressLocality: "Davao City",
+          addressCountry: "PH",
+        },
+        telephone: v.phone,
+        url: `https://davaopickpos-jrhmrcab.manus.space/schedule?venueId=${v.id}`,
+        description: v.description ?? `${v.name} — ${v.courtCount} pickleball court${v.courtCount === 1 ? "" : "s"} in ${v.district ?? "Davao City"}`,
+      })),
+    [venues],
+  );
+
+  usePageMeta({
+    title: "Davao Pickleball POS — Book a Court in Minutes | Every Court in Davao",
+    description:
+      "Real-time availability, booking, and checkout for every pickleball court in Davao City. Browse live hourly slots across 8 venues and reserve your court in minutes.",
+    venues: venueJsonLd,
   });
 
   const venueRates = (venueId: number) => {

@@ -1,0 +1,13 @@
+{
+  "name": "Davao Pickleball POS",
+  "short_name": "Pickleball POS",
+  "description": "Real-time availability, booking, and checkout for every pickleball court in Davao City.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0b3d2e",
+  "theme_color": "#0b3d2e",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

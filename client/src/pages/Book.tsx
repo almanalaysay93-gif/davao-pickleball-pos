@@ -16,6 +16,7 @@ import { Clock, Moon, ReceiptText, Sun } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useLocation, useSearch } from "wouter";
 import { trpc } from "@/lib/trpc";
+import { usePageMeta } from "@/lib/meta";
 import { useBooking } from "@/contexts/BookingContext";
 import { AnnouncementsBanner } from "@/components/AnnouncementsBanner";
 import { VenueLocationMap, VenueGalleryHero } from "@/components/VenueLocation";
@@ -40,6 +41,14 @@ export default function Book() {
   const [duration, setDuration] = useState(1); // hours
   const [playerName, setPlayerName] = useState(draft.playerName ?? "");
   const [contact, setContact] = useState(draft.contact ?? "");
+
+  const bookVenue = venues?.find(v => v.id === venueId);
+  usePageMeta({
+    title: bookVenue
+      ? `Book ${bookVenue.name} — Pickleball Court Davao | Davao Pickleball POS`
+      : "Book a Court — Instant Pickleball Booking in Davao | Davao Pickleball POS",
+    description: "Reserve a pickleball court in Davao City in minutes: pick your venue, date, and hourly slot, then check out instantly.",
+  });
 
   const courts = trpc.courts.byVenue.useQuery(
     { venueId: venueId ?? 1 },

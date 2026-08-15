@@ -182,6 +182,7 @@ export default function CustomerLayout({ children }: { children: ReactNode }) {
               <li><Link href="/schedule" className="hover:text-primary transition-colors">Schedule & Availability</Link></li>
               <li><Link href="/book" className="hover:text-primary transition-colors">Book a Court</Link></li>
               <li><Link href="/my-bookings" className="hover:text-primary transition-colors">My Bookings</Link></li>
+              <li><Link href="/booking-policy" className="hover:text-primary transition-colors">Booking Policy</Link></li>
               {!signedInCustomer && (
                 <li><Link href="/customer-login" className="hover:text-primary transition-colors">Create account</Link></li>
               )}

@@ -16,6 +16,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { trpc } from "@/lib/trpc";
+import { usePageMeta } from "@/lib/meta";
 import { formatPHP, formatHour, formatDate } from "@shared/rates";
 import {
   BadgeCheck,
@@ -33,6 +34,11 @@ import { toast } from "sonner";
 
 export default function MyBookings() {
   const { user } = useAuth();
+  usePageMeta({
+    title: "My Bookings — Manage Your Reservations | Davao Pickleball POS",
+    description:
+      "View, reschedule, or cancel your pickleball court bookings across Davao City venues.",
+  });
   const [query, setQuery] = useState("");
   const [searched, setSearched] = useState("");
   const utils = trpc.useUtils();

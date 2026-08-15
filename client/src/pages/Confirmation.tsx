@@ -4,6 +4,7 @@ import { formatHour, formatPHP } from "@shared/rates";
 import { BadgeCheck, CalendarDays, CircleDollarSign, Clock, MapPin, Printer } from "lucide-react";
 import { Link, useRoute } from "wouter";
 import { trpc } from "@/lib/trpc";
+import { usePageMeta } from "@/lib/meta";
 import { useBooking } from "@/contexts/BookingContext";
 import { VenueLocationMap, VenueGalleryHero } from "@/components/VenueLocation";
 import { useEffect } from "react";
@@ -12,6 +13,11 @@ export default function Confirmation() {
   const [, params] = useRoute("/confirmation/:reference");
   const reference = params?.reference ?? "";
   const { resetDraft } = useBooking();
+
+  usePageMeta({
+    title: "Booking Confirmed — Davao Pickleball POS",
+    description: "Your pickleball court reservation in Davao City has been confirmed. See your booking details and directions.",
+  });
 
   const { data, isLoading, error } = trpc.bookings.get.useQuery(
     { reference },

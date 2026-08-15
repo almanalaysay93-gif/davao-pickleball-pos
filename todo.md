@@ -235,3 +235,17 @@
 - [x] Fix pricePerHour mapping: numeric returned as number → normalized to 2-decimal string (MySQL DECIMAL parity)
 - [x] Test suite rewritten to Supabase-backed helpers; teardown fixed (try/finally var scoping); 81/81 vitest specs passing
 - [x] Typecheck clean; live site verified (customer + owner portals); code pushed to user's GitHub repo (almanalaysay93-gif/davao-pickleball-pos)
+
+## Beat PickleHub.ph (competitor analysis, Aug 15 2026)
+- [x] Per-route page titles + meta description (document.title updates per route via usePageMeta stack; defaults in index.html)
+- [x] Open Graph + Twitter Card tags (og:title/description/image/twitter injected into index.html, canonical)
+- [x] JSON-LD structured data: SportsActivityLocation ItemList for venues on Home (Courts/Schedule get per-venue titles+descriptions)
+- [x] robots.txt + dynamic sitemap.xml (live venue routes, verified via curl)
+- [x] PWA manifest + icons (site.webmanifest, icon-192/512, favicon, apple-touch-icon)
+- [x] Alt text on all venue images (already present on GalleryCarousel, Home/Courts/Book/Admin cards) — verified no missing alts
+- [x] Footer copyright year auto ({new Date().getFullYear()}); coverage text lists venues + footer links incl. booking policy
+- [x] Booking policy & cancellation transparency page (/booking-policy with CustomerLayout + footer link; counters competitor's biggest complaint)
+- [x] Non-intrusive announcements: dismissible banner with X, remembers dismissal in localStorage (dismissed-announcements)
+- [x] Delightful themed 404 page (pickleball pun "This page went long", Home/Schedule/Book CTAs)
+- [x] Venue badges/trust signals: court count badge + day/night pricing on directory cards (existing, verified)
+- [x] Run vitest + typecheck + visual QA (81/81 tests, tsc clean, desktop+mobile screenshots), checkpoint, deliver

@@ -14,6 +14,7 @@ import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Clock, Search } fr
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useSearch } from "wouter";
 import { trpc } from "@/lib/trpc";
+import { usePageMeta } from "@/lib/meta";
 import { AnnouncementsBanner } from "@/components/AnnouncementsBanner";
 import { VenueLocationMap, VenueGalleryHero } from "@/components/VenueLocation";
 
@@ -55,6 +56,16 @@ export default function Schedule() {
   }, [venueId, initialVenueId, venues]);
 
   const queryError = availability.error;
+
+  const selectedVenue = venues?.find(v => v.id === venueId);
+  usePageMeta({
+    title: selectedVenue
+      ? `${selectedVenue.name} — Schedule & Availability | Davao Pickleball POS`
+      : "Schedule & Availability — Pickleball Courts Davao | Davao Pickleball POS",
+    description: selectedVenue
+      ? `Hourly court availability at ${selectedVenue.name} in ${selectedVenue.district ?? "Davao City"} for ${playerDate}. Book your slot in minutes.`
+      : `Browse hourly court availability across Davao City's pickleball venues for any date and book your slot in minutes.`,
+  });
 
   // Hooks must run on every render — keep useMemo above any early return.
   const filtered = useMemo(() => {

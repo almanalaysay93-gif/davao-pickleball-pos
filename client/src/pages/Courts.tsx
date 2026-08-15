@@ -20,6 +20,7 @@ import {
 import { useState } from "react";
 import { Link } from "wouter";
 import { trpc } from "@/lib/trpc";
+import { usePageMeta } from "@/lib/meta";
 import { AnnouncementsBanner } from "@/components/AnnouncementsBanner";
 import { MapView } from "@/components/Map";
 import { GalleryCarousel } from "@/components/GalleryCarousel";
@@ -38,6 +39,15 @@ export default function Courts() {
 
   const detail = venues?.find(v => v.id === selectedVenueId);
   const detailTiers = selectedVenueId ? venueTiers(selectedVenueId) : [];
+
+  usePageMeta({
+    title: detail
+      ? `${detail.name} — Pickleball Courts in Davao City | Davao Pickleball POS`
+      : "Court Directory — Every Pickleball Venue in Davao | Davao Pickleball POS",
+    description: detail
+      ? `${detail.name}: ${detail.courtCount} courts, ${detail.address}, Davao City. See live availability and book hourly slots.`
+      : "Browse every major pickleball venue in Davao City — court counts, rates, addresses, and live availability in one directory.",
+  });
 
   return (
     <div className="container py-7 md:py-14 fade-in">
