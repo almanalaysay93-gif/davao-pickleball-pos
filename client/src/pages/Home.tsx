@@ -17,7 +17,7 @@ import { useMemo } from "react";
 import { trpc } from "@/lib/trpc";
 import { usePageMeta, type JsonLdItem } from "@/lib/meta";
 import { AnnouncementsBanner } from "@/components/AnnouncementsBanner";
-import { VenueLocationMap, VenueGalleryHero } from "@/components/VenueLocation";
+import { VenueGalleryHero } from "@/components/VenueLocation";
 
 const highlights = [
   {
@@ -275,7 +275,7 @@ export default function Home() {
         <AnnouncementsBanner />
       </section>
 
-      {/* Map of all venues */}
+      {/* Map of all venues — now on its own page */}
       {venues && venues.length > 0 && !isLoading && (
         <section className="container py-8 md:py-14">
           <div className="max-w-xl">
@@ -285,15 +285,21 @@ export default function Home() {
             <h2 className="mt-3 text-2xl md:text-3xl font-semibold text-balance">
               All venues on the map
             </h2>
+            <p className="mt-3 text-muted-foreground">
+              Every venue in Davao City, with photos, locations, and directions.
+            </p>
           </div>
-          {/* Photo gallery hero at the top of the venue section */}
           <div className="mt-6">
             <VenueGalleryHero venue={venues[0]} />
           </div>
-          <div className="mt-6 grid gap-4 lg:grid-cols-2">
-            {venues.map(v => (
-              <VenueLocationMap key={v.id} venue={v} />
-            ))}
+          <div className="mt-6">
+            <Link href="/map">
+              <Button
+                size="lg"
+                className="press font-semibold shadow-md">
+                View the full map
+              </Button>
+            </Link>
           </div>
         </section>
       )}

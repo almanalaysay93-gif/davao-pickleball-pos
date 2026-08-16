@@ -9,6 +9,7 @@ import { Link, useLocation } from "wouter";
 const navLinks = [
   { href: "/", label: "Home", icon: CircleDot },
   { href: "/courts", label: "Courts", icon: MapPin },
+  { href: "/map", label: "Find your court", icon: MapPin },
   { href: "/schedule", label: "Schedule", icon: CalendarDays },
   { href: "/book", label: "Book a Court", icon: LayoutGrid },
 ];

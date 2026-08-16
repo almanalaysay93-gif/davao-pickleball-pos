@@ -21,6 +21,7 @@ export function registerSitemap(app: Express) {
         { path: "/", priority: "1.0", changefreq: "daily" },
         { path: "/courts", priority: "0.9", changefreq: "daily" },
         { path: "/schedule", priority: "0.9", changefreq: "daily" },
+        { path: "/map", priority: "0.9", changefreq: "weekly" },
         { path: "/book", priority: "0.8", changefreq: "daily" },
         { path: "/my-bookings", priority: "0.5", changefreq: "weekly" },
         { path: "/customer-login", priority: "0.5", changefreq: "weekly" },

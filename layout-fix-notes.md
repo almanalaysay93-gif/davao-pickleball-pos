@@ -24,3 +24,21 @@ In the stitched image, "Built for players" heading appeared clipped/overlapping 
 1. Owner daily revenue/occupancy dashboard reports
 2. SMS/email booking reminders (needs Twilio/Resend credentials)
 3. "Find a game" community open-play board (competitor sentiment opportunity)
+
+---
+
+# Dedicated Map Page Task (Aug 16 2026, follow-up)
+
+User request: move "Find your court / All venues on the map" section to its own page, nav button between Courts and Schedule.
+
+Progress:
+- [x] Created `client/src/pages/Map.tsx` — dedicated /map page with hero, VenueGalleryHero (venues[0]), grid of VenueLocationMap cards, CTA band, usePageMeta title/desc, JSON-LD ItemList.
+- [x] Added nav entry `{ href: "/map", label: "Find your court", icon: MapPin }` between Courts and Schedule in CustomerLayout.tsx navLinks; imported MapPinned icon (unused, harmless — check lint).
+- [x] Home.tsx: removed full map grid, kept section with "View the full map" Button linking to /map.
+- [ ] Register route <Route path={"/map"} component={Map} /> in App.tsx (CustomerApp switch, customer routes at ~lines 28-36).
+- [ ] Update sitemap.ts to include /map route.
+- [ ] Update usePageMeta note: signature is {title, description?, venues?} — do NOT pass route param.
+- [ ] Typecheck + vitest (81/81) + screenshots, checkpoint, push github main.
+
+Checkpoint history: f6e8e883 (layout polish, latest delivered). Auto-publish enabled.
+GitHub repo: almanalaysay93-gif/davao-pickleball-pos (remote name "github", branch main).

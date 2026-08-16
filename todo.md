@@ -254,3 +254,8 @@
 - [x] Add proper side margins on desktop so content is not flush to screen edges (global .container override: max-width min(92%, 1200px) + centered + clamp padding)
 - [x] Center page elements/sections horizontally for a balanced layout (margin-inline: auto on .container applies site-wide)
 - [x] Verify on desktop (1280+) and mobile, checkpoint, deliver (81/81 tests, tsc clean, screenshots at 1893x934 and 375x812 verified)
+
+## Dedicated map page (user feedback, Aug 16 2026)
+- [x] Extract "Find your court / All venues on the map" section from Home into its own page (/map) — new Map.tsx with hero, gallery, map grid, JSON-LD, meta title/description; Home keeps compact teaser with "View the full map" CTA
+- [x] Add nav button between Courts and Schedule pointing to the map page
+- [x] Added /map to dynamic sitemap.xml; run vitest (81/81) + typecheck + desktop/mobile visual QA, checkpoint, deliver

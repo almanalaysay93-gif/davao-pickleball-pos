@@ -14,6 +14,7 @@ import Book from "./pages/Book";
 import Checkout from "./pages/Checkout";
 import Confirmation from "./pages/Confirmation";
 import BookingPolicy from "./pages/BookingPolicy";
+import MapPage from "./pages/Map";
 import Admin from "./pages/Admin";
 import MyBookings from "./pages/MyBookings";
 import Owner from "./pages/Owner";
@@ -27,6 +28,7 @@ function CustomerApp() {
       <Switch>
         <Route path={"/"} component={Home} />
         <Route path={"/courts"} component={Courts} />
+        <Route path={"/map"} component={MapPage} />
         <Route path={"/schedule"} component={Schedule} />
         <Route path={"/book"} component={Book} />
         <Route path={"/checkout"} component={Checkout} />
