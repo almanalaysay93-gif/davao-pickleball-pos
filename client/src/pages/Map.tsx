@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { ChevronDown, MapPin } from "lucide-react";
+import { ChevronDown, Crosshair, MapPin } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
 import { MapView } from "@/components/Map";
 import {
   VenueGalleryHero,
@@ -54,11 +55,33 @@ function groupLabel(key: string, count: number): string {
   return `${key}${count > 1 ? ` (${count} venues)` : ""}`;
 }
 
+/** Haversine distance in kilometres between two lat/lng points. */
+function haversineKm(
+  a: { lat: number; lng: number },
+  b: { lat: number; lng: number },
+): number {
+  const R = 6371;
+  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
+  const p = Math.sin(dLat / 2) ** 2 +
+    Math.cos((a.lat * Math.PI) / 180) *
+      Math.cos((b.lat * Math.PI) / 180) *
+      Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(p), Math.sqrt(1 - p));
+}
+
+/** Format a distance in km for display, e.g. "2.3 km away". */
+function fmtDistance(km: number): string {
+  if (!Number.isFinite(km)) return "—";
+  return `${km < 0.1 ? "<0.1" : km.toFixed(1)} km away`;
+}
+
 /** Venue row inside an accordion — clicking focuses the venue on the combined map. */
 function VenueListRow({
   venue,
   active,
   onClick,
+  distance,
 }: {
   venue: {
     id: number;
@@ -68,6 +91,7 @@ function VenueListRow({
   };
   active: boolean;
   onClick: () => void;
+  distance?: number;
 }) {
   return (
     <div
@@ -76,6 +100,11 @@ function VenueListRow({
         active ? "ring-2 ring-primary border-primary" : "",
       )}>
       <VenueLocationInfo venue={venue} />
+      {typeof distance === "number" && (
+        <p className="mt-2 text-xs font-medium text-accent">
+          {fmtDistance(distance)}
+        </p>
+      )}
       <Button
         variant="outline"
         size="sm"
@@ -96,15 +125,22 @@ function VenueListByLocation({
   venues,
   selected,
   onSelect,
+  coords,
+  onEnableNearMe,
 }: {
   venues: {
     id: number;
     name: string;
     address: string;
     district?: string | null;
+    __dist?: number;
   }[];
   selected: number | null;
   onSelect: (id: number) => void;
+  /** Player coordinates when "near me" is active and permission granted. */
+  coords: { lat: number; lng: number } | null;
+  /** Request geolocation permission to activate near-me sorting. */
+  onEnableNearMe: () => void;
 }) {
   const groups = useMemo(() => {
     const map = new Map<string, typeof venues>();
@@ -113,10 +149,16 @@ function VenueListByLocation({
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(v);
     }
-    return Array.from(map.entries()).sort((a, b) =>
-      a[0].localeCompare(b[0]),
-    );
-  }, [venues]);
+    const entries = Array.from(map.entries());
+    if (!coords) {
+      // Default: alphabetical by district/area.
+      return entries.sort((a, b) => a[0].localeCompare(b[0]));
+    }
+    // Near me: groups ordered by their closest venue's distance to the player.
+    const minDist = (list: typeof venues) =>
+      Math.min(...list.map(v => v.__dist ?? Infinity));
+    return entries.sort((a, b) => minDist(a[1]) - minDist(b[1]));
+  }, [venues, coords]);
 
   const [openGroup, setOpenGroup] = useState<string | null>(
     groups.length > 0 ? groups[0][0] : null,
@@ -131,6 +173,29 @@ function VenueListByLocation({
 
   return (
     <div className="flex flex-col gap-3">
+      {/* Near me toggle — request location and sort groups by distance */}
+      <div className="flex items-center gap-3 px-1">
+        <Crosshair
+          className={cn(
+            "h-4 w-4 shrink-0 transition-colors duration-150",
+            coords ? "text-accent" : "text-muted-foreground",
+          )}
+        />
+        <span className="text-sm font-medium text-foreground">
+          Sort by distance
+        </span>
+        <Switch
+          checked={coords !== null}
+          onCheckedChange={onEnableNearMe}
+          aria-label="Sort venues by distance from your location"
+        />
+        {coords && (
+          <span className="text-xs text-muted-foreground">
+            Near me
+          </span>
+        )}
+      </div>
+
       {groups.map(([key, list]) => {
         const open = openGroup === key;
         return (
@@ -160,6 +225,7 @@ function VenueListByLocation({
                     venue={v}
                     active={selected === v.id}
                     onClick={() => onSelect(v.id)}
+                    distance={v.__dist}
                   />
                 ))}
               </CardContent>
@@ -189,6 +255,49 @@ function CombinedVenueMap({
   const mapRef = useRef<google.maps.Map | null>(null);
   const markersRef = useRef<google.maps.marker.AdvancedMarkerElement[]>([]);
   const [selected, setSelected] = useState<number | null>(null);
+  const [myCoords, setMyCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [geolocError, setGeolocError] = useState(false);
+  // Geocoded venue positions, keyed by venue id.
+  const venueCoords = useRef<Map<number, { lat: number; lng: number }>>(new Map());
+
+  const enableNearMe = () => {
+    if (myCoords) {
+      setMyCoords(null);
+      return;
+    }
+    if (!navigator.geolocation) {
+      setGeolocError(true);
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      pos => {
+        setMyCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        setGeolocError(false);
+      },
+      () => setGeolocError(true),
+      { enableHighAccuracy: false, timeout: 10000 },
+    );
+  };
+
+  // Recompute per-venue distances whenever near-me toggles or geocoding updates.
+  const venuesWithDist = useMemo(() => {
+    if (!myCoords) return venues;
+    return venues.map(v => {
+      const c = venueCoords.current.get(v.id);
+      return {
+        ...v,
+        __dist: c ? haversineKm(myCoords, c) : undefined,
+      };
+    });
+  }, [venues, myCoords]);
+
+  // Store geocoded positions so distances can be computed for the list.
+  useEffect(() => {
+    for (const v of venuesWithDist) {
+      const c = venueCoords.current.get(v.id);
+      if (c) venueCoords.current.set(v.id, c);
+    }
+  }, [venuesWithDist.length]);
 
   // Clear the marker cache whenever the venue list changes (route remount).
   useEffect(() => {
@@ -205,6 +314,10 @@ function CombinedVenueMap({
     map.panTo(pos);
     map.setZoom(16);
   };
+
+  const [nearMeTick, setNearMeTick] = useState(0);
+  const myCoordsRef = useRef(myCoords);
+  myCoordsRef.current = myCoords;
 
   return (
     <div className="flex flex-col lg:flex-row gap-5">
@@ -233,6 +346,10 @@ function CombinedVenueMap({
                         lng: results[0].geometry.location.lng(),
                       };
                       zoom = 15;
+                      // Remember the geocoded position for near-me distance sorting.
+                      venueCoords.current.set(venue.id, loc);
+                      // If near-me is active, re-sort the list with the new coordinate.
+                      if (myCoordsRef.current) setNearMeTick(t => t + 1);
                     }
                     // Offset markers slightly when venues geocode to the same point
                     // (e.g. same barangay) so pins remain distinguishable.
@@ -296,10 +413,17 @@ function CombinedVenueMap({
       {/* Venue list grouped by location — dropdown rows that focus the map */}
       <div className="lg:w-1/3 order-2 lg:order-1">
         <VenueListByLocation
-          venues={venues}
+          venues={venuesWithDist}
           selected={selected}
           onSelect={selectVenue}
+          coords={myCoords}
+          onEnableNearMe={enableNearMe}
         />
+        {geolocError && (
+          <p className="px-1 text-xs text-muted-foreground">
+            Location access denied — sorting by district instead.
+          </p>
+        )}
       </div>
     </div>
   );

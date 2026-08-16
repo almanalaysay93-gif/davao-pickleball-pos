@@ -271,3 +271,10 @@
 - [x] Keep "Show on map" and Get directions per venue working inside accordions
 - [x] Default-expanded first group; group auto-opens when its venue is selected; verified desktop (1280/1440) + tsc clean
 - [x] Run vitest (81/81) + visual QA, checkpoint, deliver
+
+## Near-me sorting on map page (Aug 16 2026)
+- [x] Add "Near me" toggle in the map page venue list header (Sort by distance switch above the group accordions)
+- [x] Geolocation permission request + distance sort (Haversine on geocoded coords; live re-sort as geocoding completes)
+- [x] Show per-venue distance labels (e.g. "2.3 km away") when near me is active
+- [x] Fallback when geolocation unavailable/denied (shows friendly message, keeps alphabetical)
+- [x] Run vitest (81/81) + typecheck + visual QA (toggle visible at 1280px), checkpoint, deliver
