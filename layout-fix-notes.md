@@ -42,3 +42,19 @@ Progress:
 
 Checkpoint history: f6e8e883 (layout polish, latest delivered). Auto-publish enabled.
 GitHub repo: almanalaysay93-gif/davao-pickleball-pos (remote name "github", branch main).
+
+---
+
+# Location-grouped dropdown venue list (Aug 16 2026)
+
+User request: venue list on /map should be dropdown (accordion) buttons grouped by location/district.
+
+Progress:
+- [x] Replaced flat VenueListRow cards with VenueListByLocation: groups derived via groupKey() (district or first address token), alphabetical sort, ChevronDown toggle, first group open by default, auto-opens group when a venue is selected via Show on map/pin click.
+- [x] Venue rows moved inside accordion content (VenueLocationInfo + Show on map button preserved, Get directions preserved).
+- [x] Verified at 1440x900: "Bajada" accordion group header with Arena Athletics row visible, map on right.
+- [x] tsc clean, vitest 81/81 passing.
+- [ ] Save checkpoint + push github main + deliver.
+
+Checkpoint history: 751c8705 (combined map, last delivered). Auto-publish enabled.
+GitHub remote name: github, branch main, repo almanalaysay93-gif/davao-pickleball-pos.

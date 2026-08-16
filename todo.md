@@ -265,3 +265,9 @@
 - [x] Build one large interactive map with pins for all venues + venue list panel for comparison (CombinedVenueMap: map on right 2/3, cards left 1/3 on desktop; stacked on mobile; pins with info windows, collision offsets, fitBounds, "Show on map" focus)
 - [x] Keep get-directions links working per venue (VenueLocationInfo reused in list rows)
 - [x] Run vitest (81/81) + typecheck + desktop/mobile visual QA, checkpoint, deliver
+
+## Location-grouped dropdown venue list on map page (Aug 16 2026)
+- [x] Replace flat venue cards with accordion sections grouped by district/location (VenueListByLocation: groupKey by district or first address token, alphabetical, venue count per group)
+- [x] Keep "Show on map" and Get directions per venue working inside accordions
+- [x] Default-expanded first group; group auto-opens when its venue is selected; verified desktop (1280/1440) + tsc clean
+- [x] Run vitest (81/81) + visual QA, checkpoint, deliver

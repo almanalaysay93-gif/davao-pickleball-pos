@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { MapPin } from "lucide-react";
+import { ChevronDown, MapPin } from "lucide-react";
 import { MapView } from "@/components/Map";
 import {
   VenueGalleryHero,
@@ -42,7 +42,19 @@ function directionsQuery(venue: {
   return parts.join(", ");
 }
 
-/** Venue row in the side list — clicking focuses the venue on the combined map. */
+/** Derive a grouping key from the venue's district or address. */
+function groupKey(v: { district?: string | null; address: string }): string {
+  if (v.district && v.district.trim()) return v.district.trim();
+  const first = v.address.split(",").map(s => s.trim()).find(s => s.length > 0);
+  return first ?? "Davao City";
+}
+
+/** Human-friendly label for a group of venues, e.g. "Tugbok (2 venues)". */
+function groupLabel(key: string, count: number): string {
+  return `${key}${count > 1 ? ` (${count} venues)` : ""}`;
+}
+
+/** Venue row inside an accordion — clicking focuses the venue on the combined map. */
 function VenueListRow({
   venue,
   active,
@@ -58,22 +70,104 @@ function VenueListRow({
   onClick: () => void;
 }) {
   return (
-    <Card
+    <div
       className={cn(
-        "border-border bg-card transition-colors duration-150 hover:border-primary/50",
+        "rounded-lg border border-border bg-card px-4 py-3 transition-colors duration-150",
         active ? "ring-2 ring-primary border-primary" : "",
       )}>
-      <CardContent className="p-4">
-        <VenueLocationInfo venue={venue} />
-        <Button
-          variant="outline"
-          size="sm"
-          className="mt-3 w-full press"
-          onClick={onClick}>
-          Show on map
-        </Button>
-      </CardContent>
-    </Card>
+      <VenueLocationInfo venue={venue} />
+      <Button
+        variant="outline"
+        size="sm"
+        className="mt-3 w-full press"
+        onClick={onClick}>
+        Show on map
+      </Button>
+    </div>
+  );
+}
+
+/**
+ * Location-grouped dropdown venue list: venues are grouped by district/
+ * area, each group an expandable accordion with its count. Clicking a venue
+ * focuses it on the combined map. The first group is open by default.
+ */
+function VenueListByLocation({
+  venues,
+  selected,
+  onSelect,
+}: {
+  venues: {
+    id: number;
+    name: string;
+    address: string;
+    district?: string | null;
+  }[];
+  selected: number | null;
+  onSelect: (id: number) => void;
+}) {
+  const groups = useMemo(() => {
+    const map = new Map<string, typeof venues>();
+    for (const v of venues) {
+      const key = groupKey(v);
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(v);
+    }
+    return Array.from(map.entries()).sort((a, b) =>
+      a[0].localeCompare(b[0]),
+    );
+  }, [venues]);
+
+  const [openGroup, setOpenGroup] = useState<string | null>(
+    groups.length > 0 ? groups[0][0] : null,
+  );
+
+  // Auto-open the group containing a newly selected venue so it is visible.
+  useEffect(() => {
+    if (selected === null) return;
+    const v = venues.find(x => x.id === selected);
+    if (v) setOpenGroup(groupKey(v));
+  }, [selected, venues]);
+
+  return (
+    <div className="flex flex-col gap-3">
+      {groups.map(([key, list]) => {
+        const open = openGroup === key;
+        return (
+          <Card key={key} className={cn("border-border bg-card", open ? "ring-2 ring-primary/60 border-primary" : "")}>
+            {/* Dropdown toggle */}
+            <button
+              type="button"
+              onClick={() => setOpenGroup(open ? null : key)}
+              className="w-full flex items-center gap-3 px-4 py-3.5 text-left press"
+              aria-expanded={open}>
+              <MapPin className="h-4 w-4 shrink-0 text-accent" />
+              <span className="font-display font-semibold text-sm">
+                {groupLabel(key, list.length)}
+              </span>
+              <ChevronDown
+                className={cn(
+                  "ml-auto h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200",
+                  open ? "rotate-180" : "",
+                )}
+              />
+            </button>
+            {open && (
+              <CardContent className="flex flex-col gap-3 pb-4 pt-0">
+                {list.map(v => (
+                  <VenueListRow
+                    key={v.id}
+                    venue={v}
+                    active={selected === v.id}
+                    onClick={() => onSelect(v.id)}
+                  />
+                ))}
+              </CardContent>
+            )}
+          </Card>
+        );
+      })}
+    </div>
   );
 }
 
@@ -199,16 +293,13 @@ function CombinedVenueMap({
         </Card>
       </div>
 
-      {/* Venue list — click a venue to focus it on the map */}
-      <div className="lg:w-1/3 order-2 lg:order-1 flex flex-col gap-3">
-        {venues.map(v => (
-          <VenueListRow
-            key={v.id}
-            venue={v}
-            active={selected === v.id}
-            onClick={() => selectVenue(v.id)}
-          />
-        ))}
+      {/* Venue list grouped by location — dropdown rows that focus the map */}
+      <div className="lg:w-1/3 order-2 lg:order-1">
+        <VenueListByLocation
+          venues={venues}
+          selected={selected}
+          onSelect={selectVenue}
+        />
       </div>
     </div>
   );
