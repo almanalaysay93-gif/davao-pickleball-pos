@@ -249,3 +249,8 @@
 - [x] Delightful themed 404 page (pickleball pun "This page went long", Home/Schedule/Book CTAs)
 - [x] Venue badges/trust signals: court count badge + day/night pricing on directory cards (existing, verified)
 - [x] Run vitest + typecheck + visual QA (81/81 tests, tsc clean, desktop+mobile screenshots), checkpoint, deliver
+
+## Margin/centering layout fix (user feedback, Aug 16 2026)
+- [x] Add proper side margins on desktop so content is not flush to screen edges (global .container override: max-width min(92%, 1200px) + centered + clamp padding)
+- [x] Center page elements/sections horizontally for a balanced layout (margin-inline: auto on .container applies site-wide)
+- [x] Verify on desktop (1280+) and mobile, checkpoint, deliver (81/81 tests, tsc clean, screenshots at 1893x934 and 375x812 verified)

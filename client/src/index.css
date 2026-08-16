@@ -47,6 +47,15 @@
   html {
     overflow-x: hidden;
   }
+  /* Global content wrapper: content never sits flush against screen edges.
+     Side margins are 4% on each side (capped at 1200px content width) and the
+     column is centered, so sections stay balanced on wide monitors too. */
+  .container {
+    width: 100%;
+    max-width: min(92%, 1200px);
+    margin-inline: auto;
+    padding-inline: clamp(1rem, 4vw, 3rem);
+  }
   * {
     @apply border-border;
   }
