@@ -47,32 +47,32 @@ export default function CustomerLayout({ children }: { children: ReactNode }) {
             </span>
           </Link>
 
-          <nav className="hidden md:flex items-center gap-1">
+          <nav className="hidden md:flex items-center gap-0.5">
             {navLinks.map(l => (
               <Link
                 key={l.href}
                 href={l.href}
                 className={cn(
-                  "px-3.5 py-2 rounded-md text-sm font-medium transition-colors duration-150 flex items-center gap-1.5",
+                  "px-3.5 py-2 rounded-md text-sm font-medium transition-colors duration-150 flex items-center gap-1.5 whitespace-nowrap",
                   location === l.href
                     ? "bg-primary text-primary-foreground"
                     : "text-foreground/75 hover:bg-secondary hover:text-secondary-foreground",
                 )}>
-                {l.icon && <l.icon className="h-4 w-4" />}
-                {l.label}
+                {l.icon && <l.icon className="h-4 w-4 shrink-0" />}
+                <span className="hidden xl:inline">{l.label}</span>
               </Link>
             ))}
             {showMyBookings && (
               <Link
                 href="/my-bookings"
                 className={cn(
-                  "px-3.5 py-2 rounded-md text-sm font-medium transition-colors duration-150 flex items-center gap-1.5",
+                  "px-3.5 py-2 rounded-md text-sm font-medium transition-colors duration-150 flex items-center gap-1.5 whitespace-nowrap",
                   location === "/my-bookings"
                     ? "bg-primary text-primary-foreground"
                     : "text-foreground/75 hover:bg-secondary hover:text-secondary-foreground",
                 )}>
-                <UserRound className="h-4 w-4" />
-                My Bookings
+                <UserRound className="h-4 w-4 shrink-0" />
+                <span className="hidden xl:inline">My Bookings</span>
               </Link>
             )}
           </nav>
@@ -93,7 +93,7 @@ export default function CustomerLayout({ children }: { children: ReactNode }) {
                 <Button
                   variant="outline"
                   size="sm"
-                  className="hidden sm:inline-flex border-primary/40 text-primary hover:bg-primary/10">
+                  className="hidden sm:inline-flex border-primary/40 text-primary hover:bg-primary/10 whitespace-nowrap">
                   <UserRound className="h-4 w-4 mr-1" />
                   Sign In
                 </Button>
