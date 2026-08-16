@@ -259,3 +259,9 @@
 - [x] Extract "Find your court / All venues on the map" section from Home into its own page (/map) — new Map.tsx with hero, gallery, map grid, JSON-LD, meta title/description; Home keeps compact teaser with "View the full map" CTA
 - [x] Add nav button between Courts and Schedule pointing to the map page
 - [x] Added /map to dynamic sitemap.xml; run vitest (81/81) + typecheck + desktop/mobile visual QA, checkpoint, deliver
+
+## Combined interactive map on Find your court (Aug 16 2026)
+- [x] Review VenueLocation/Map component and venue geo data (geocodes per venue via Geocoder, fallback Davao center)
+- [x] Build one large interactive map with pins for all venues + venue list panel for comparison (CombinedVenueMap: map on right 2/3, cards left 1/3 on desktop; stacked on mobile; pins with info windows, collision offsets, fitBounds, "Show on map" focus)
+- [x] Keep get-directions links working per venue (VenueLocationInfo reused in list rows)
+- [x] Run vitest (81/81) + typecheck + desktop/mobile visual QA, checkpoint, deliver
