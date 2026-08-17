@@ -22,7 +22,7 @@ const TABLE_ALIASES: Record<string, string> = {
   venues: "venues", courts: "courts", rateTiers: "rate_tiers", bookings: "bookings",
   announcements: "announcements", ownerCredentials: "owner_credentials",
   customerAccounts: "customer_accounts", venueGallery: "venue_gallery",
-  venueOwners: "venue_owners", users: "users",
+  venueOwners: "venue_owners", users: "users", reviews: "reviews",
 };
 
 /** Map snake_case Postgres rows to the camelCase field names the routers expect. */
@@ -75,6 +75,13 @@ const MAPS: Record<string, (row: Row) => Row> = {
     loginMethod: row.login_method, lastSignedIn: row.last_signed_in,
     role: row.role, createdAt: row.created_at,
   }),
+  reviews: row => ({
+    id: Number(row.id ?? 0), venueId: Number(row.venue_id ?? 0),
+    playerName: row.player_name, playerEmail: row.player_email ?? null,
+    rating: Number(row.rating ?? 0), comment: row.comment,
+    bookingRef: row.booking_ref != null ? Number(row.booking_ref) : null,
+    createdAt: row.created_at,
+  }),
 };
 
 /** Reverse map: camelCase input → snake_case Postgres columns. */
@@ -99,6 +106,7 @@ const REVERSE: Record<string, Record<string, string>> = {
   venueGallery: { venueId: "venue_id", imageKey: "image_key", sortOrder: "sort_order" },
   venueOwners: { userId: "user_id", venueId: "venue_id" },
   users: { openId: "open_id", name: "name", email: "email", loginMethod: "login_method", lastSignedIn: "last_signed_in", role: "role" },
+  reviews: { venueId: "venue_id", playerName: "player_name", playerEmail: "player_email", rating: "rating", comment: "comment", bookingRef: "booking_ref" },
 };
 
 function toSnake(table: string, input: Row): Row {

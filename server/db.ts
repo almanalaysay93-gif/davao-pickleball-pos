@@ -406,6 +406,7 @@ export async function deleteVenuesByNamePattern(pattern: string) {
       await q("venueOwners").eq("venue_id", v.id).del();
       await q("courts").eq("venue_id", v.id).del();
       await q("bookings").eq("venue_id", v.id).del();
+      await q("reviews").eq("venue_id", v.id).del();
       await deleteWhere("owner_credentials", [c => c.eq("venue_id", String(v.id))]);
       await q("venues").eq("id", v.id).del();
     }
@@ -546,7 +547,74 @@ export async function deleteVenue(venueId: number) {
   await q("venueOwners").eq("venue_id", venueId).del();
   await q("courts").eq("venue_id", venueId).del();
   await q("bookings").eq("venue_id", venueId).del();
+  await q("reviews").eq("venue_id", venueId).del();
   await deleteWhere("owner_credentials", [chain => chain.eq("venue_id", String(venueId))]);
   await q("venues").eq("id", venueId).del();
   return { success: true } as const;
+}
+
+/* ───────────── Reviews ───────────── */
+
+export interface ReviewRow {
+  id: number; venueId: number; playerName: string; playerEmail: string | null;
+  rating: number; comment: string; bookingRef: number | null; createdAt: unknown;
+}
+
+export async function createReview(data: {
+  venueId: number; playerName: string; playerEmail?: string | null;
+  rating: number; comment: string; bookingRef?: number | null;
+}): Promise<ReviewRow> {
+  const rows = await q("reviews").insert({
+    venueId: data.venueId, playerName: data.playerName,
+    playerEmail: data.playerEmail ?? null, rating: data.rating,
+    comment: data.comment.trim(), bookingRef: data.bookingRef ?? null,
+  });
+  return rows[0] as unknown as ReviewRow;
+}
+
+export async function listVenueReviews(venueId: number, limit = 50): Promise<ReviewRow[]> {
+  return (await q("reviews").eq("venue_id", venueId).order("created_at", { ascending: false }).limit(limit).exec()) as unknown as ReviewRow[];
+}
+
+export async function listAllReviews(limit = 200): Promise<ReviewRow[]> {
+  return (await q("reviews").order("created_at", { ascending: false }).limit(limit).exec()) as unknown as ReviewRow[];
+}
+
+export async function listReviewsForVenues(venueIds: number[], limit = 100): Promise<ReviewRow[]> {
+  if (venueIds.length === 0) return [];
+  return (await q("reviews").in("venue_id", venueIds).order("created_at", { ascending: false }).limit(limit).exec()) as unknown as ReviewRow[];
+}
+
+export async function venueReviewStats(venueId: number): Promise<{ average: number; count: number }> {
+  const rows = await q("reviews").select("rating").eq("venue_id", venueId).execRaw();
+  const ratings = rows.map(r => Number(r.rating ?? 0));
+  const count = ratings.length;
+  const average = count === 0 ? 0 : Math.round((ratings.reduce((a, b) => a + b, 0) / count) * 10) / 10;
+  return { average, count };
+}
+
+export async function allVenueReviewStats(): Promise<Record<number, { average: number; count: number }>> {
+  const rows = await q("reviews").select("venue_id,rating").execRaw();
+  const byVenue: Record<number, number[]> = {};
+  for (const r of rows) {
+    const v = Number(r.venue_id ?? 0);
+    if (!v) continue;
+    (byVenue[v] ??= []).push(Number(r.rating ?? 0));
+  }
+  const out: Record<number, { average: number; count: number }> = {};
+  for (const [v, ratings] of Object.entries(byVenue)) {
+    out[Number(v)] = {
+      average: Math.round((ratings.reduce((a, b) => a + b, 0) / ratings.length) * 10) / 10,
+      count: ratings.length,
+    };
+  }
+  return out;
+}
+
+export async function deleteReviewsByVenue(venueId: number) {
+  await q("reviews").eq("venue_id", venueId).del();
+}
+
+export async function deleteReviewsAll() {
+  await q("reviews").del();
 }

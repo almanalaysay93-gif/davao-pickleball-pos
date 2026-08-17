@@ -7,6 +7,7 @@ import { trpc } from "@/lib/trpc";
 import { usePageMeta } from "@/lib/meta";
 import { useBooking } from "@/contexts/BookingContext";
 import { VenueLocationMap, VenueGalleryHero } from "@/components/VenueLocation";
+import { ReviewForm, VenueReviews } from "@/components/ReviewForm";
 import { useEffect } from "react";
 
 export default function Confirmation() {
@@ -144,6 +145,16 @@ export default function Confirmation() {
             )}
           </div>
         ) : null}
+
+        {/* Player reviews: see what others say, and leave your own */}
+        {data?.venue && (
+          <div className="mt-6 max-w-md mx-auto">
+            <VenueReviews venueId={data.venue.id} />
+            <div className="mt-6">
+              <ReviewForm venueId={data.venue.id} bookingRef={reference} />
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

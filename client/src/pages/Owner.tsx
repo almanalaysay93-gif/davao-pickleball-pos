@@ -39,6 +39,7 @@ import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Link, useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
+import { OwnerReviewsFeed } from "@/components/OwnerReviewsFeed";
 
 export default function Owner() {
   const { user, loading: authLoading } = useAuth();
@@ -199,6 +200,11 @@ function OwnerDashboard() {
             <VenuePanel key={v.id} venueId={v.id} />
           ))}
         </div>
+      </div>
+
+      {/* Live player reviews for owned venues */}
+      <div className="mt-10">
+        <OwnerReviewsFeed venueIds={venuesList.map(v => v.id)} />
       </div>
 
       {/* Bookings across owned venues */}

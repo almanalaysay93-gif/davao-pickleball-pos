@@ -716,6 +716,26 @@ export const appRouter = router({
       return { reference } as const;
     }),
 
+    /** Owner: live reviews feed across owned venues. */
+    reviews: ownerProcedure
+      .input(
+        z
+          .object({ venueId: z.number().int().positive().optional() })
+          .optional(),
+      )
+      .query(async ({ input, ctx }) => {
+        // If the owner narrowed to a venue, it must be one they own — no peeking
+        // at other venues by guessing ids. Without a filter, default to all owned.
+        const ids = input?.venueId
+          ? (ownsVenue(ctx, input.venueId) ? [input.venueId] : [])
+          : ownsVenuesList(ctx) ?? [];
+        const [rows, stats] = await Promise.all([
+          db.listReviewsForVenues(ids),
+          ids.length === 1 ? db.venueReviewStats(ids[0]) : Promise.resolve(null),
+        ]);
+        return { rows, stats } as const;
+      }),
+
     /** Owner: list announcements at owned venues (all, incl. inactive). */
     announcements: ownerProcedure
       .input(
@@ -804,6 +824,56 @@ export const appRouter = router({
       .query(async ({ input }) => {
         const ids = input?.venueId ? [input.venueId] : undefined;
         return db.listActiveAnnouncements(ids);
+      }),
+  }),
+
+  reviews: router({
+    /** Public: reviews for a venue, or all reviews when no venue given. */
+    list: publicProcedure
+      .input(z.object({ venueId: z.number().int().positive() }).optional())
+      .query(async ({ input }) => {
+        if (input?.venueId) return db.listVenueReviews(input.venueId);
+        return db.listAllReviews();
+      }),
+
+    /** Public: rating stats for a venue, or all venues when no venue given. */
+    stats: publicProcedure
+      .input(z.object({ venueId: z.number().int().positive().optional() }).optional())
+      .query(async ({ input }) => {
+        if (input?.venueId) return db.venueReviewStats(input.venueId);
+        return db.allVenueReviewStats();
+      }),
+
+    /** Public: submit a review (guest players too); bookingRef is optional proof of a visit. */
+    create: publicProcedure
+      .input(
+        z.object({
+          venueId: z.number().int().positive(),
+          playerName: z.string().min(1).max(64).trim(),
+          playerEmail: z.string().email().optional(),
+          rating: z.number().int().min(1).max(5),
+          comment: z.string().min(1).max(1000).trim(),
+          bookingRef: z.string().max(32).optional(),
+        }),
+      )
+      .mutation(async ({ input }) => {
+        const venue = await db.getVenueById(input.venueId);
+        if (!venue) throw new TRPCError({ code: "NOT_FOUND", message: "Venue not found" });
+        let bookingRefId: number | null = null;
+        if (input.bookingRef) {
+          const booking = await db.getBookingByReference(input.bookingRef);
+          if (!booking) throw new TRPCError({ code: "NOT_FOUND", message: "Booking reference not found" });
+          if (booking.venueId !== input.venueId) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: "Booking is not for this venue" });
+          }
+          bookingRefId = booking.id;
+        }
+        await db.createReview({
+          venueId: input.venueId, playerName: input.playerName,
+          playerEmail: input.playerEmail ?? null, rating: input.rating,
+          comment: input.comment, bookingRef: bookingRefId,
+        });
+        return { success: true } as const;
       }),
   }),
 

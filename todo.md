@@ -278,3 +278,12 @@
 - [x] Show per-venue distance labels (e.g. "2.3 km away") when near me is active
 - [x] Fallback when geolocation unavailable/denied (shows friendly message, keeps alphabetical)
 - [x] Run vitest (81/81) + typecheck + visual QA (toggle visible at 1280px), checkpoint, deliver
+
+## Live venue reviews (Aug 17 2026)
+- [x] Create `reviews` table in Supabase (venue_id, player_name, rating 1-5, comment, booking_ref optional, created_at)
+- [x] Add db helpers: createReview, listVenueReviews (live), listAllReviews, listReviewsForVenues, venueReviewStats, allVenueReviewStats, cascade deletes
+- [x] tRPC procedures: reviews.create/list/stats (public, guest+account; rating + comment required, bookingRef optional proof of visit) + owner.reviews feed (scoped to owned venues; venueId filter checked against ownership, no peeking)
+- [x] Customer UI: ReviewForm (star rating picker) + VenueReviews list wired into the Confirmation page below the receipt (venueId from booking, optional bookingRef prefill)
+- [x] Owner dashboard: live reviews feed card (OwnerReviewsFeed, polls every 10s) in the Player reviews section with rating average + count per venue, verified in browser
+- [x] Review vitest spec (server/reviews.test.ts, 9 tests: validation, creation, stats averaging, owner scoping/isolation, master access, cascade on venue delete)
+- [x] Run vitest + typecheck + visual QA, checkpoint, deliver
