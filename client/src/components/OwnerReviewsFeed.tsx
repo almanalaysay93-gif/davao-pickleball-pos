@@ -46,7 +46,7 @@ export function OwnerReviewsFeed({ venueIds }: { venueIds: number[] }) {
             .map(([venueId, s]) => (
               <div
                 key={venueId}
-                className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-sm">
+                className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-1.5 text-sm">
                 <span className="font-semibold text-amber-500">★</span>
                 <span className="font-bold">{s.average.toFixed(1)}</span>
                 <span className="text-muted-foreground">({s.count})</span>

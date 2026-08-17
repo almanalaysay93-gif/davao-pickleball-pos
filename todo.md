@@ -287,3 +287,9 @@
 - [x] Owner dashboard: live reviews feed card (OwnerReviewsFeed, polls every 10s) in the Player reviews section with rating average + count per venue, verified in browser
 - [x] Review vitest spec (server/reviews.test.ts, 9 tests: validation, creation, stats averaging, owner scoping/isolation, master access, cascade on venue delete)
 - [x] Run vitest + typecheck + visual QA, checkpoint, deliver
+
+## Bug: Player reviews feed blank on owner dashboard (Aug 17)
+- [x] Diagnose why OwnerReviewsFeed renders blank (user screenshot shows empty feed section)
+- [x] Fix rendering so reviews (or proper loading states) display: master-owner fix in owner.reviews (listAllReviews when ownsAllVenues), scoped test cleanup replacing system-wide review wipe that was deleting real reviews, self-healing scoping test against parallel venueOwners wipe
+- [x] Verify with real review data in browser, typecheck, tests
+- [ ] Checkpoint, push to GitHub, deliver

@@ -618,3 +618,8 @@ export async function deleteReviewsByVenue(venueId: number) {
 export async function deleteReviewsAll() {
   await q("reviews").del();
 }
+
+/** Delete reviews whose player name starts with the given test prefix (safe, scoped cleanup). */
+export async function deleteReviewsByPlayerNamePrefix(prefix: string) {
+  await q("reviews").like("player_name", `${prefix}%`).del();
+}

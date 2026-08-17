@@ -726,13 +726,28 @@ export const appRouter = router({
       .query(async ({ input, ctx }) => {
         // If the owner narrowed to a venue, it must be one they own — no peeking
         // at other venues by guessing ids. Without a filter, default to all owned.
-        const ids = input?.venueId
-          ? (ownsVenue(ctx, input.venueId) ? [input.venueId] : [])
-          : ownsVenuesList(ctx) ?? [];
-        const [rows, stats] = await Promise.all([
-          db.listReviewsForVenues(ids),
-          ids.length === 1 ? db.venueReviewStats(ids[0]) : Promise.resolve(null),
-        ]);
+        // The master owner session (ownsAllVenues, no venue list) pulls every
+        // review instead of falling through to an empty owned list.
+        let rows: Awaited<ReturnType<typeof db.listReviewsForVenues>>;
+        let stats: Awaited<ReturnType<typeof db.venueReviewStats>> | null;
+        if (input?.venueId) {
+          if (!ownsVenue(ctx, input.venueId)) {
+            return { rows: [], stats: null } as const;
+          }
+          [rows, stats] = await Promise.all([
+            db.listReviewsForVenues([input.venueId]),
+            db.venueReviewStats(input.venueId),
+          ]);
+        } else if (ctx.ownsAllVenues) {
+          rows = await db.listAllReviews();
+          stats = null;
+        } else {
+          const ids = ownsVenuesList(ctx) ?? [];
+          [rows, stats] = await Promise.all([
+            db.listReviewsForVenues(ids),
+            ids.length === 1 ? db.venueReviewStats(ids[0]) : Promise.resolve(null),
+          ]);
+        }
         return { rows, stats } as const;
       }),
 

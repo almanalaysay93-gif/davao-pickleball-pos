@@ -5,9 +5,10 @@ import {
   getUserByEmail,
   upsertUser,
   listVenues,
-  deleteReviewsAll,
+  deleteReviewsByPlayerNamePrefix,
   deleteVenuesByNamePattern,
   deleteUserByOpenId,
+  grantVenueOwnership,
 } from "./db";
 
 type AuthenticatedUser = NonNullable<TrpcContext["user"]>;
@@ -55,7 +56,11 @@ const venueName = "Arena Athletics";
 
 describe("reviews router — public endpoints and validation", () => {
   afterEach(async () => {
-    await deleteReviewsAll().catch(() => undefined);
+    // Scoped cleanup only — never wipe real player reviews from the live DB.
+    await deleteReviewsByPlayerNamePrefix("Ada").catch(() => undefined);
+    await deleteReviewsByPlayerNamePrefix("ShortGuy").catch(() => undefined);
+    await deleteReviewsByPlayerNamePrefix("Bench Player").catch(() => undefined);
+    await deleteReviewsByPlayerNamePrefix("Dink Master").catch(() => undefined);
   });
 
   it("returns empty stats when a venue has no reviews", async () => {
@@ -172,7 +177,11 @@ describe("owner.reviews — scoping rules", () => {
       const adminCaller = appRouter.createCaller(adminCtx());
       await adminCaller.admin.grantOwnership({ venueId: arena.id, email });
       const seeded = await getUserByEmail(email);
-      const ownerCaller = appRouter.createCaller(legacyOwnerCtx(seeded!.id, { email }));
+      if (!seeded) throw new Error(`test user not created for ${email}`);
+      // Parallel worker tests wipe venueOwners rows — re-grant right before use
+      // so this test's scoping assertions are never defeated by a sibling worker.
+      await grantVenueOwnership(seeded.id, arena.id);
+      const ownerCaller = appRouter.createCaller(legacyOwnerCtx(seeded.id, { email }));
 
       // A guest's review for the owned venue
       await appRouter.createCaller(guestCtx()).reviews.create({
@@ -189,7 +198,14 @@ describe("owner.reviews — scoping rules", () => {
         comment: "x".repeat(12),
       });
 
-      const ownerData = await ownerCaller.owner.reviews();
+      // Other workers (bookings tests) wipe venueOwners rows concurrently, so
+      // re-grant and re-fetch until this test's review row is visible.
+      let ownerData = await ownerCaller.owner.reviews();
+      for (let attempt = 0; attempt < 5 && !ownerData.rows.some((r: any) => r.playerName === "Reviewer"); attempt++) {
+        await grantVenueOwnership(seeded.id, arena.id);
+        await new Promise(res => setTimeout(res, 250));
+        ownerData = await ownerCaller.owner.reviews();
+      }
       expect(ownerData.rows.some((r: any) => r.playerName === "Reviewer")).toBe(true);
       expect(ownerData.rows.every((r: any) => r.playerName !== "OtherReviewer")).toBe(true);
       // Per-venue stats when scoped to the owned venue
@@ -204,7 +220,9 @@ describe("owner.reviews — scoping rules", () => {
       const scoped = await ownerCaller.owner.reviews({ venueId: other.id });
       expect(scoped.rows.length).toBe(0);
     } finally {
-      await deleteReviewsAll().catch(() => undefined);
+      await deleteReviewsByPlayerNamePrefix("Reviewer").catch(() => undefined);
+      await deleteReviewsByPlayerNamePrefix("OtherReviewer").catch(() => undefined);
+      await deleteReviewsByPlayerNamePrefix("CascadeTest").catch(() => undefined);
       await deleteUserByOpenId(`test-${email}`).catch(() => undefined);
     }
   });
@@ -212,21 +230,25 @@ describe("owner.reviews — scoping rules", () => {
   it("master owner sees reviews for all venues when scoped per-venue", async () => {
     const venues = await listVenues();
     const arena = venues.find(v => v.name === venueName)!;
-    await appRouter.createCaller(guestCtx()).reviews.create({
-      venueId: arena.id,
-      playerName: "MasterView",
-      rating: 5,
-      comment: "x".repeat(12),
-    });
-    const master = appRouter.createCaller(adminCtx());
-    // Master with a venueId filter still sees the review (owns all venues).
-    const scoped = await master.owner.reviews({ venueId: arena.id });
-    expect(scoped.rows.some((r: any) => r.playerName === "MasterView")).toBe(true);
-    // Master without a filter falls back to per-venue defaults (no venue list
-    // attached to their session), so the feed is empty by design — the master
-    // aggregates venues one at a time with the venueId filter.
-    const all = await master.owner.reviews();
-    expect(all.rows.length).toBe(0);
+    try {
+      await appRouter.createCaller(guestCtx()).reviews.create({
+        venueId: arena.id,
+        playerName: "MasterView",
+        rating: 5,
+        comment: "x".repeat(12),
+      });
+      const master = appRouter.createCaller(adminCtx());
+      // Master with a venueId filter still sees the review (owns all venues).
+      const scoped = await master.owner.reviews({ venueId: arena.id });
+      expect(scoped.rows.some((r: any) => r.playerName === "MasterView")).toBe(true);
+      // Master without a filter pulls every review system-wide (no venue list
+      // attached to their session) — the master owns all venues, so the feed
+      // must never be empty.
+      const all = await master.owner.reviews();
+      expect(all.rows.some((r: any) => r.playerName === "MasterView")).toBe(true);
+    } finally {
+      await deleteReviewsByPlayerNamePrefix("MasterView").catch(() => undefined);
+    }
   });
 });
 
@@ -262,7 +284,7 @@ describe("reviews cleanup", () => {
       const gone = await appRouter.createCaller(guestCtx()).reviews.stats({ venueId });
       expect(gone.count).toBe(0);
     } finally {
-      await deleteReviewsAll().catch(() => undefined);
+      await deleteReviewsByPlayerNamePrefix("CascadeTest").catch(() => undefined);
     }
   });
 });
