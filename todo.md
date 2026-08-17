@@ -292,4 +292,4 @@
 - [x] Diagnose why OwnerReviewsFeed renders blank (user screenshot shows empty feed section)
 - [x] Fix rendering so reviews (or proper loading states) display: master-owner fix in owner.reviews (listAllReviews when ownsAllVenues), scoped test cleanup replacing system-wide review wipe that was deleting real reviews, self-healing scoping test against parallel venueOwners wipe
 - [x] Verify with real review data in browser, typecheck, tests
-- [ ] Checkpoint, push to GitHub, deliver
+- [x] Checkpoint, push to GitHub, deliver
