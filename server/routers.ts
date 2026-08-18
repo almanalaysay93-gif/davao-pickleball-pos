@@ -6,6 +6,13 @@ import * as db from "./db";
 import { priceSlot, generateSlots } from "@shared/rates";
 import { storagePut } from "./storage";
 
+/** One-time alphanumeric password generated when a staff member is added. */
+function randomOneTimePassword(): string {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
+  const bytes = crypto.getRandomValues(new Uint8Array(12));
+  return Array.from(bytes, b => chars[b % chars.length]).join("");
+}
+
 import {
   clearAuthCookies,
   hashPassword,
@@ -676,7 +683,10 @@ export const appRouter = router({
         const resultVenueIds = Array.from(new Set(rows.map(r => r.venueId)));
         const venueRows = resultVenueIds.length ? await db.listVenuesByIds(resultVenueIds) : [];
         const venueMap = new Map(venueRows.map((v: { id: number }) => [v.id, v]));
-        return rows.map(r => ({ booking: r, venue: venueMap.get(r.venueId) ?? null }));
+        const courtIds = Array.from(new Set(rows.map(r => r.courtId)));
+        const courtRows = courtIds.length ? await db.listCourtsByIds(courtIds) : [];
+        const courtMap = new Map(courtRows.map((c: { id: number; courtNumber: string }) => [c.id, c.courtNumber]));
+        return rows.map(r => ({ booking: r, venue: venueMap.get(r.venueId) ?? null, courtNumber: courtMap.get(r.courtId) ?? null }));
       }),
 
     markPaid: ownerProcedure
@@ -701,7 +711,13 @@ export const appRouter = router({
           throw new TRPCError({ code: "FORBIDDEN", message: "This booking is not at your venue" });
         }
         await db.updateBookingStatus(input.id, { paymentStatus: "cancelled" });
-        return { success: true } as const;
+        // Free slot released — automatically mark the first not-yet-notified waitlister.
+        const waitlisters = await db.listWaitlistForSlot(
+          booking.venueId, booking.courtId, booking.playerDate, booking.startHour, booking.endHour,
+        );
+        const next = waitlisters.find(w => !w.notified);
+        if (next) await db.markWaitlistNotified(next.id);
+        return { success: true, waitlistNotified: Boolean(next) } as const;
       }),
 
     /** Owner: create a booking (owner reserves a court through the same flow). */
@@ -751,6 +767,255 @@ export const appRouter = router({
         return { rows, stats } as const;
       }),
 
+    /* ── Review replies ── */
+    replies: ownerProcedure
+      .input(
+        z.object({ venueId: z.number().int().positive().optional() }).optional(),
+      )
+      .query(async ({ input, ctx }) => {
+        let reviewRows: Awaited<ReturnType<typeof db.listReviewsForVenues>>;
+        if (input?.venueId) {
+          if (!ownsVenue(ctx, input.venueId)) return { rows: [], replies: [] } as const;
+          reviewRows = await db.listVenueReviews(input.venueId, 200);
+        } else if (ctx.ownsAllVenues) {
+          reviewRows = await db.listAllReviews(200);
+        } else {
+          reviewRows = await db.listReviewsForVenues(ownsVenuesList(ctx) ?? [], 200);
+        }
+        const scoped = reviewRows.filter(r => ownsVenue(ctx, r.venueId));
+        const replies = await db.listRepliesForReviews(scoped.map(r => r.id));
+        return { rows: scoped, replies } as const;
+      }),
+    createReply: ownerProcedure
+      .input(z.object({ reviewId: z.number().int().positive(), body: z.string().min(1).max(1000).trim() }))
+      .mutation(async ({ input, ctx }) => {
+        const all = await db.listAllReviews(500);
+        const review = all.find(r => r.id === input.reviewId);
+        if (!review) throw new TRPCError({ code: "NOT_FOUND", message: "Review not found" });
+        if (!ownsVenue(ctx, review.venueId)) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "You do not own this venue" });
+        }
+        await db.deleteRepliesForReview(input.reviewId); // one reply per review — editing replaces
+        await db.createReviewReply(input.reviewId, ctx.user!.id, input.body);
+        return { success: true } as const;
+      }),
+    deleteReply: ownerProcedure
+      .input(z.object({ reviewId: z.number().int().positive() }))
+      .mutation(async ({ input, ctx }) => {
+        const all = await db.listAllReviews(500);
+        const review = all.find(r => r.id === input.reviewId);
+        if (!review) throw new TRPCError({ code: "NOT_FOUND", message: "Review not found" });
+        if (!ownsVenue(ctx, review.venueId)) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "You do not own this venue" });
+        }
+        await db.deleteRepliesForReview(input.reviewId);
+        return { success: true } as const;
+      }),
+    /* ── Staff (multi-login per venue) ── */
+    staff: ownerProcedure
+      .input(z.object({ venueId: z.number().int().positive().optional() }))
+      .query(async ({ input, ctx }) => {
+        const ids = input?.venueId ? [input.venueId] : ownsVenuesList(ctx) ?? [];
+        if (!ctx.ownsAllVenues && input?.venueId && !ownsVenue(ctx, input.venueId)) return [];
+        return db.listVenueStaff(ids);
+      }),
+    addStaff: ownerProcedure
+      .input(z.object({ venueId: z.number().int().positive(), email: z.string().email().toLowerCase(), role: z.enum(["staff", "owner"]).default("staff") }))
+      .mutation(async ({ input, ctx }) => {
+        if (!ownsVenue(ctx, input.venueId)) throw new TRPCError({ code: "FORBIDDEN", message: "You do not own this venue" });
+        const user = await db.getUserByEmail(input.email);
+        if (!user) throw new TRPCError({ code: "NOT_FOUND", message: "No account found with that email — the staff member must sign in once first" });
+        await db.setRole(user.id, "owner");
+        await db.addStaff(user.id, input.venueId, input.role);
+        await db.grantVenueOwnership(user.id, input.venueId);
+        // Auto-provision an owner-portal login for the new staff member:
+        // username = their email, one-time password returned to the inviter.
+        const existingCred = await db.getOwnerCredentialByUsername(input.email);
+        if (existingCred && existingCred.venueId === input.venueId) {
+          return { success: true, userId: user.id, provisioned: false } as const;
+        }
+        const oneTimePassword = randomOneTimePassword();
+        const hash = await hashPassword(oneTimePassword);
+        await db.insertOwnerCredential({ username: input.email, passwordHash: hash, venueId: input.venueId });
+        return { success: true, userId: user.id, provisioned: true, oneTimePassword, username: input.email } as const;
+      }),
+    removeStaff: ownerProcedure
+      .input(z.object({ userId: z.number().int().positive(), venueId: z.number().int().positive() }))
+      .mutation(async ({ input, ctx }) => {
+        if (!ownsVenue(ctx, input.venueId)) throw new TRPCError({ code: "FORBIDDEN", message: "You do not own this venue" });
+        await db.removeStaff(input.userId, input.venueId);
+        const remaining = await db.listOwnerVenueIds(input.userId);
+        if (remaining.length === 0) await db.setRole(input.userId, "user");
+        return { success: true } as const;
+      }),
+    /* ── Memberships ── */
+    memberships: ownerProcedure
+      .input(z.object({ venueId: z.number().int().positive() }))
+      .query(async ({ input, ctx }) => {
+        if (!ownsVenue(ctx, input.venueId)) throw new TRPCError({ code: "FORBIDDEN", message: "You do not own this venue" });
+        return db.listMembershipsWithAccounts(input.venueId);
+      }),
+    createMembership: ownerProcedure
+      .input(
+        z.object({
+          venueId: z.number().int().positive(),
+          name: z.string().min(1).max(64).trim(),
+          description: z.string().max(500).trim().optional(),
+          price: z.string().regex(/^\d+(\.\d{1,2})?$/, "Price must be a number"),
+          credits: z.number().int().min(1).max(500).default(1),
+          validityDays: z.number().int().min(1).max(730).default(30),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        if (!ownsVenue(ctx, input.venueId)) throw new TRPCError({ code: "FORBIDDEN", message: "You do not own this venue" });
+        await db.createMembership({
+          venueId: input.venueId, name: input.name, description: input.description ?? null,
+          price: input.price, credits: input.credits, validityDays: input.validityDays,
+        });
+        return { success: true } as const;
+      }),
+    deleteMembership: ownerProcedure
+      .input(z.object({ id: z.number().int().positive() }))
+      .mutation(async ({ input, ctx }) => {
+        const venues = await db.listVenues();
+        let foundVenueId: number | null = null;
+        for (const v of venues) {
+          const rows = await db.listMembershipsByVenue(v.id);
+          if (rows.some(r => r.id === input.id)) { foundVenueId = v.id; break; }
+        }
+        if (!foundVenueId || !ownsVenue(ctx, foundVenueId)) throw new TRPCError({ code: "FORBIDDEN", message: "You do not own this membership plan" });
+        await db.deleteMembership(input.id);
+        return { success: true } as const;
+      }),
+    sellMembership: ownerProcedure
+      .input(z.object({ name: z.string().min(1).max(128).trim(), phone: z.string().max(32).optional(), membershipId: z.number().int().positive() }))
+      .mutation(async ({ input, ctx }) => {
+        const venues = await db.listVenues();
+        let foundVenueId: number | null = null;
+        for (const v of venues) {
+          const rows = await db.listMembershipsByVenue(v.id);
+          if (rows.some(r => r.id === input.membershipId)) { foundVenueId = v.id; break; }
+        }
+        if (!foundVenueId || !ownsVenue(ctx, foundVenueId)) throw new TRPCError({ code: "FORBIDDEN", message: "You do not own this membership plan" });
+        const row = await db.createMemberAccount({ name: input.name, phone: input.phone ?? null, membershipId: input.membershipId });
+        return { success: true, id: row.id, expiresAt: row.expiresAt } as const;
+      }),
+    /** Public: membership plans at a venue (players see them at checkout). */
+    membershipsPublic: publicProcedure
+      .input(z.object({ venueId: z.number().int().positive() }))
+      .query(async ({ input }) => db.listMembershipsByVenue(input.venueId)),
+    /* ── Reports (date range, revenue, occupancy, CSV export) ── */
+    reports: ownerProcedure
+      .input(
+        z.object({
+          venueId: z.number().int().positive().optional(),
+          start: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Start must be YYYY-MM-DD"),
+          end: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "End must be YYYY-MM-DD"),
+        }),
+      )
+      .query(async ({ input, ctx }) => {
+        const ids = input?.venueId ? [input.venueId] : ownsVenuesList(ctx) ?? [];
+        const rows = await db.listOwnerBookings(ids, { limit: 5000 });
+        const scoped = rows.filter(b => ownsVenue(ctx, b.venueId) && b.playerDate >= input.start && b.playerDate <= input.end);
+        const paid = scoped.filter(b => b.paymentStatus === "paid");
+        const revenue = paid.reduce((sum, b) => sum + Number(b.totalAmount ?? 0), 0);
+        const dayByDate: Record<string, { date: string; revenue: number; paidCount: number; pendingCount: number; slots: number }> = {};
+        for (const b of scoped) {
+          const d = dayByDate[b.playerDate] ??= { date: b.playerDate, revenue: 0, paidCount: 0, pendingCount: 0, slots: 0 };
+          d.slots += 1;
+          if (b.paymentStatus === "paid") { d.paidCount += 1; d.revenue += Number(b.totalAmount ?? 0); }
+          if (b.paymentStatus === "pending") d.pendingCount += 1;
+        }
+        const days = Object.values(dayByDate).sort((a, b) => a.date.localeCompare(b.date));
+        const csvLines = [
+          "date,revenue,paid_bookings,pending_bookings,total_slots",
+          ...days.map(d => `${d.date},${d.revenue.toFixed(2)},${d.paidCount},${d.pendingCount},${d.slots}`),
+        ];
+        return {
+          revenue: Number(revenue.toFixed(2)),
+          paidCount: paid.length, pendingCount: scoped.length - paid.length, totalBookings: scoped.length,
+          days, csv: csvLines.join("\n"),
+        } as const;
+      }),
+    /* ── Recurring bookings (series) ── */
+    createSeries: ownerProcedure
+      .input(
+        z.object({
+          venueId: z.number().int().positive(), courtId: z.number().int().positive(),
+          startHour: z.string().regex(/^\d{2}:\d{2}$/), endHour: z.string().regex(/^\d{2}:\d{2}$/),
+          startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+          weeks: z.number().int().min(1).max(52),
+          weekdays: z.array(z.number().int().min(0).max(6)).min(1).max(7), // 0=Sun..6=Sat
+          playerName: z.string().min(1).max(128),
+          contact: z.string().max(64).optional(),
+          paymentMethod: z.string().max(32).optional(),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        if (!ownsVenue(ctx, input.venueId)) throw new TRPCError({ code: "FORBIDDEN", message: "You do not own this venue" });
+        const seriesId = `sr${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+        const created: string[] = [];
+        const skipped: string[] = [];
+        for (let w = 0; w < input.weeks; w += 1) {
+          for (const wd of input.weekdays) {
+            const d = new Date(`${input.startDate}T00:00:00+08:00`);
+            d.setDate(d.getDate() + w * 7 + ((wd - d.getDay() + 7) % 7));
+            const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+            const conflict = await db.findConflictingBooking(input.venueId, input.courtId, dateStr, input.startHour, input.endHour);
+            if (conflict) { skipped.push(dateStr); continue; }
+            const tiers = await db.listRateTiersByVenue(input.venueId);
+            const pricing = priceSlot(input.startHour, input.endHour, tiers);
+            const reference = await db.generateReference();
+            await db.insertBooking({
+              venueId: input.venueId, courtId: input.courtId, playerDate: dateStr,
+              startHour: input.startHour, endHour: input.endHour, playerName: input.playerName,
+              contact: input.contact ?? null, customerAccountId: null, channel: "walkin" as const,
+              paymentMethod: input.paymentMethod ?? null, reference, seriesId,
+              dayAmount: String(pricing.dayAmount), nightAmount: String(pricing.nightAmount),
+              totalAmount: String(pricing.total), paymentStatus: input.paymentMethod ? "paid" : "pending",
+            });
+            created.push(dateStr);
+          }
+        }
+        return { seriesId, createdCount: created.length, skippedCount: skipped.length, skipped } as const;
+      }),
+    /* ── Waitlist ── */
+    waitlist: ownerProcedure
+      .input(z.object({ venueId: z.number().int().positive() }))
+      .query(async ({ input, ctx }) => {
+        if (!ownsVenue(ctx, input.venueId)) throw new TRPCError({ code: "FORBIDDEN", message: "You do not own this venue" });
+        return db.listWaitlistForVenue(input.venueId);
+      }),
+    notifyWaitlist: ownerProcedure
+      .input(z.object({ id: z.number().int().positive(), venueId: z.number().int().positive() }))
+      .mutation(async ({ input, ctx }) => {
+        if (!ownsVenue(ctx, input.venueId)) throw new TRPCError({ code: "FORBIDDEN", message: "You do not own this venue" });
+        await db.markWaitlistNotified(input.id);
+        return { success: true } as const;
+      }),
+    dismissWaitlist: ownerProcedure
+      .input(z.object({ id: z.number().int().positive(), venueId: z.number().int().positive() }))
+      .mutation(async ({ input, ctx }) => {
+        if (!ownsVenue(ctx, input.venueId)) throw new TRPCError({ code: "FORBIDDEN", message: "You do not own this venue" });
+        await db.removeFromWaitlist(input.id);
+        return { success: true } as const;
+      }),
+    /* ── Notifications (unread booking bell) ── */
+    notifications: ownerProcedure
+      .input(z.object({ venueId: z.number().int().positive().optional() }))
+      .query(async ({ input, ctx }) => {
+        const ids = input?.venueId ? [input.venueId] : ownsVenuesList(ctx) ?? [];
+        const count = await db.countUnreadBookings(ids);
+        const rows = await db.listUnreadBookings(ids, 20);
+        return { count, rows: rows.filter(b => ownsVenue(ctx, b.venueId)) } as const;
+      }),
+    markNotificationsRead: ownerProcedure
+      .input(z.object({ venueId: z.number().int().positive().optional() }))
+      .mutation(async ({ input, ctx }) => {
+        const ids = input?.venueId ? [input.venueId] : ownsVenuesList(ctx) ?? [];
+        await db.markBookingsSeen(ids);
+        return { success: true } as const;
+      }),
     /** Owner: list announcements at owned venues (all, incl. inactive). */
     announcements: ownerProcedure
       .input(
@@ -829,6 +1094,42 @@ export const appRouter = router({
   }),
 
   /** Public announcements visible to players. */
+  waitlist: router({
+    /** Public: a player joins the waitlist for a fully-booked slot. */
+    join: publicProcedure
+      .input(
+        z.object({
+          venueId: z.number().int().positive(), courtId: z.number().int().positive(),
+          playerDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+          startHour: z.string().regex(/^\d{2}:\d{2}$/), endHour: z.string().regex(/^\d{2}:\d{2}$/),
+          playerName: z.string().min(1).max(128).trim(), contact: z.string().max(64).optional(),
+        }),
+      )
+      .mutation(async ({ input }) => {
+        const venue = await db.getVenueById(input.venueId);
+        if (!venue) throw new TRPCError({ code: "NOT_FOUND", message: "Venue not found" });
+        const court = (await db.listCourtsByVenue(input.venueId)).find(c => c.id === input.courtId);
+        if (!court) throw new TRPCError({ code: "NOT_FOUND", message: "Court not found" });
+        // Prefer waitlisting on genuinely full slots (a confirmed booking exists) — but
+        // also allow it if no conflict at all? A waitlist for an empty slot is pointless:
+        // require the slot to already be booked.
+        const conflict = await db.findConflictingBooking(input.venueId, input.courtId, input.playerDate, input.startHour, input.endHour);
+        if (!conflict) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "This slot is still open — book it directly instead" });
+        }
+        const existing = await db.listWaitlistForSlot(input.venueId, input.courtId, input.playerDate, input.startHour, input.endHour);
+        if (existing.some(w => String(w.playerName).toLowerCase().trim() === input.playerName.toLowerCase().trim())) {
+          throw new TRPCError({ code: "CONFLICT", message: "You are already on the waitlist for this slot" });
+        }
+        const row = await db.joinWaitlist(input);
+        return { success: true, id: row.id, position: existing.length + 1 } as const;
+      }),
+    /** Public: find waitlist entries by player name (used by My Bookings). */
+    mine: publicProcedure
+      .input(z.object({ playerName: z.string().min(1).max(128) }))
+      .query(async ({ input }) => db.listMyWaitlist(input.playerName)),
+  }),
+
   announcements: router({
     list: publicProcedure
       .input(
@@ -890,6 +1191,11 @@ export const appRouter = router({
         });
         return { success: true } as const;
       }),
+
+    /** Public: owner replies attached to a list of reviews. */
+    replies: publicProcedure
+      .input(z.object({ reviewIds: z.array(z.number().int().positive()) }))
+      .query(async ({ input }) => db.listRepliesForReviews(input.reviewIds)),
   }),
 
   /** Admin-only: assign venue ownership to a signed-in user by email. */

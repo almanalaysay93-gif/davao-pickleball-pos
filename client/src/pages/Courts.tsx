@@ -24,6 +24,7 @@ import { usePageMeta } from "@/lib/meta";
 import { AnnouncementsBanner } from "@/components/AnnouncementsBanner";
 import { MapView } from "@/components/Map";
 import { GalleryCarousel } from "@/components/GalleryCarousel";
+import { VenueRating } from "@/pages/Home";
 
 export default function Courts() {
   const { data: venues, isLoading } = trpc.venues.list.useQuery(undefined, {
@@ -86,9 +87,12 @@ export default function Courts() {
                 onClick={() => setSelectedVenueId(v.id)}>
                 <CardContent className="p-6">
                   <div className="flex items-start justify-between gap-2">
-                    <h2 className="font-display text-xl font-semibold leading-tight group-hover:text-primary transition-colors">
-                      {v.name}
-                    </h2>
+                    <div className="flex items-start gap-2 min-w-0">
+                      <h2 className="font-display text-xl font-semibold leading-tight group-hover:text-primary transition-colors">
+                        {v.name}
+                      </h2>
+                      <VenueRating venueId={v.id} />
+                    </div>
                     <Badge variant="secondary" className="shrink-0 mt-0.5">
                       {v.courtCount} {v.courtCount === 1 ? "court" : "courts"}
                     </Badge>
@@ -181,7 +185,10 @@ export default function Courts() {
                   </span>
                 </div>
                 <div className="flex items-center justify-between text-sm">
-                  <span className="font-medium">{detail.courtCount} courts</span>
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium">{detail.courtCount} courts</span>
+                    <VenueRating venueId={detail.id} />
+                  </div>
                   <Badge variant="outline">{detail.surfaceType}</Badge>
                 </div>
               </div>

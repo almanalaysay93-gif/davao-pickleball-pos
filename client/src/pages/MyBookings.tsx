@@ -45,6 +45,10 @@ export default function MyBookings() {
 
   const isCustomer = user?.type === "customer";
 
+  // Guest-lookup identifier doubles as the waitlist player name (matches the
+  // exact name used when joining a waitlist as a guest).
+  const waitlistName = searched.length >= 3 ? searched : (isCustomer ? (user?.name ?? "") : "");
+
   // Signed-in customers see their account-linked bookings automatically.
   const { data: accountBookings, isLoading: accountLoading } =
     trpc.bookings.myAccountBookings.useQuery(undefined, {
@@ -258,7 +262,58 @@ export default function MyBookings() {
           showCancel
         />
       )}
+
+      <MyWaitlistSection playerName={waitlistName} />
     </section>
+  );
+}
+
+/** Waitlist entries matching the player's search name / signed-in account name. */
+function MyWaitlistSection({ playerName }: { playerName: string }) {
+  const query = trpc.waitlist.mine.useQuery(
+    { playerName: playerName.trim() },
+    { enabled: playerName.trim().length >= 2, refetchOnWindowFocus: true, refetchInterval: 30000 },
+  );
+  const rows = (query.data ?? []) as {
+    id: number; venueId: number; courtId: number; playerDate: string; startHour: string;
+    endHour: string; playerName: string; contact: string | null; notified: boolean;
+    notifiedAt: string | null; createdAt: unknown;
+  }[];
+  if (!playerName.trim()) return null;
+  return (
+    <div className="mt-10">
+      <h2 className="font-display text-lg font-semibold flex items-center gap-2">
+        <Clock className="h-4 w-4 text-accent" /> My waitlist entries
+      </h2>
+      <p className="mt-1 text-xs text-muted-foreground">
+        Looking up by “{playerName.trim()}” — matches the name used when joining a waitlist.
+      </p>
+      {query.isFetching ? (
+        <div className="mt-4 space-y-3">
+          <Skeleton className="h-24" />
+        </div>
+      ) : !rows.length ? (
+        <p className="mt-4 text-sm text-muted-foreground">No waitlist entries found.</p>
+      ) : (
+        <div className="mt-4 space-y-3">
+          {rows.map(w => (
+            <Card key={w.id}>
+              <CardContent className="flex items-center justify-between gap-3 py-4">
+                <div className="min-w-0">
+                  <p className="font-medium text-sm truncate">
+                    Court {w.courtId} · {formatDate(w.playerDate)} · {formatHour(w.startHour)}–{formatHour(w.endHour)}
+                  </p>
+                  <p className="text-xs text-muted-foreground">Venue #{w.venueId}</p>
+                </div>
+                <Badge variant={w.notified ? "default" : "secondary"} className={w.notified ? "bg-emerald-600 text-white hover:bg-emerald-600" : ""}>
+                  {w.notified ? "Slot available — venue notified you" : "Waiting"}
+                </Badge>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

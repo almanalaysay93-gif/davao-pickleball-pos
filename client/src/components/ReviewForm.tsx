@@ -4,7 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Star, MessageSquareQuote } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 
@@ -127,8 +127,15 @@ export function ReviewForm({ venueId, bookingRef }: { venueId: number; bookingRe
 export function VenueReviews({ venueId }: { venueId: number }) {
   const reviews = trpc.reviews.list.useQuery({ venueId }, { refetchOnWindowFocus: false });
   const stats = trpc.reviews.stats.useQuery({ venueId }, { refetchOnWindowFocus: false });
+  const reviewIds = useMemo(() => (reviews.data ?? []).slice(0, 10).map(r => r.id), [reviews.data]);
+  const replies = trpc.reviews.replies.useQuery({ reviewIds }, { enabled: reviewIds.length > 0, refetchOnWindowFocus: false });
 
   const rows = reviews.data ?? [];
+  const replyByReview = useMemo(() => {
+    const map = new Map<number, { body: string; createdAt: string | number | Date }>();
+    for (const rep of (replies.data ?? []) as any[]) map.set(rep.reviewId, rep);
+    return map;
+  }, [replies.data]);
   const statsRow = stats.data as { average: number; count: number } | undefined;
 
   if (!rows.length) return null;
@@ -161,6 +168,12 @@ export function VenueReviews({ venueId }: { venueId: number }) {
               )}
             </div>
             <p className="mt-1 text-sm text-foreground/85">{r.comment}</p>
+            {replyByReview.has(r.id) && (
+              <div className="mt-2 rounded-lg bg-accent/50 border border-accent px-3 py-2 text-xs">
+                <span className="font-semibold text-accent-foreground">Owner replied</span>
+                <p className="mt-0.5 text-foreground/85">{replyByReview.get(r.id)!.body}</p>
+              </div>
+            )}
           </div>
         ))}
       </div>

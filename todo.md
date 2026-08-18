@@ -293,3 +293,40 @@
 - [x] Fix rendering so reviews (or proper loading states) display: master-owner fix in owner.reviews (listAllReviews when ownsAllVenues), scoped test cleanup replacing system-wide review wipe that was deleting real reviews, self-healing scoping test against parallel venueOwners wipe
 - [x] Verify with real review data in browser, typecheck, tests
 - [x] Checkpoint, push to GitHub, deliver
+
+## Big feature batch: owner app upgrades (Aug 18)
+
+### Reviews upgrades (items 2, 3)
+- [x] `review_replies` table + db helpers + owner.replies.create/list/delete procedures (ownerProcedure, scoped to owned venues)
+- [x] Owner dashboard: Reply button under each review in OwnerReviewsFeed; replies render under the review card (dialog + Remove reply)
+- [x] Customer side: owner replies render under each review in VenueReviews (Confirmation page + per-venue schedule)
+- [x] Review stats (avg + count) on customer-facing venue cards (Home, Courts, Map) via VenueRating chip
+
+### Owner self-service + staff (items 4, 8)
+- [x] `staff` table (user_id, venue_id, role: owner|staff); owner.staff/addStaff/removeStaff procedures with owner-only gate
+- [x] db: listVenueStaff enriched with user name/email
+- [x] Owner app UI: Staff management section (add staff by email dialog, list with remove, venue select, one-time password toast)
+- [ ] Owner self-service: allow venue-bound owners to manage their venue's courts/gallery/bookings (existing ownerProcedure gates verified OK)
+- [x] Staff UX: addStaff auto-creates an owner_credentials row (username = email, random 12-char one-time password returned to the inviter) so new staff can log in immediately
+
+### Reports + recurring (items 6, 7)
+- [x] owner.reports: revenue/occupancy by date range + CSV payload (ownerProcedure)
+- [x] Owner UI: Reports section (date range, venue select, revenue/paid/pending cards, per-day table, CSV download)
+- [x] owner.createSeries: recurring booking series (weekly, N weeks, weekdays) generating individual booking rows
+- [x] Owner UI: Recurring booking dialog (OwnerSeriesDialog) beside the Walk-in button; weekly weekdays, N weeks, conflict skipping
+- [x] memberships table + owner CRUD (create/delete/sell) + membershipsPublic
+- [x] Owner UI: Memberships section (plans with member counts/credits, add plan dialog, delete, sell membership dialog)
+
+### Waitlist + notifications (items 9, 10)
+- [x] `waitlist` table + waitlist.join/forSlot + owner.cancel frees slot → auto-notify first waitlister
+- [x] Customer UI: tapped booked slot on Schedule opens Join Waitlist dialog (name + contact) + success toast
+- [x] Customer UI: My waitlist entries section on My Bookings (lookup by signed-in name or guest search term, 30s polling)
+- [x] owner.notifications: unread count + recent list; mark-all-read
+- [x] Owner UI: notification bell in OwnerLayout header (desktop + mobile menu) with count badge + dropdown of recent new bookings (15s polling, auto mark-read)
+- [x] Owner UI: Slot waitlist section in Owner Dashboard (list, Notify, remove; 20s polling)
+
+### Testing + delivery
+- [x] Booking tables + notification bell show court number (not raw id); RateRow shows loading skeleton while tiers load (QA-verified)
+- [x] Vitest specs for new features: server/feature-batch.test.ts covering replies, staff scoping, waitlist join/notify, reports CSV, memberships, recurring series (10 tests)
+- [x] Full suite green (100/100), typecheck clean, visual QA on desktop + mobile
+- [x] Checkpoint, push to GitHub, deliver

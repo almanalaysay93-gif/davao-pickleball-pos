@@ -23,6 +23,8 @@ const TABLE_ALIASES: Record<string, string> = {
   announcements: "announcements", ownerCredentials: "owner_credentials",
   customerAccounts: "customer_accounts", venueGallery: "venue_gallery",
   venueOwners: "venue_owners", users: "users", reviews: "reviews",
+  reviewReplies: "review_replies", staff: "staff", memberships: "memberships",
+  memberAccounts: "member_accounts", waitlist: "waitlist",
 };
 
 /** Map snake_case Postgres rows to the camelCase field names the routers expect. */
@@ -82,6 +84,35 @@ const MAPS: Record<string, (row: Row) => Row> = {
     bookingRef: row.booking_ref != null ? Number(row.booking_ref) : null,
     createdAt: row.created_at,
   }),
+  reviewReplies: row => ({
+    id: Number(row.id ?? 0), reviewId: Number(row.review_id ?? 0),
+    ownerUserId: Number(row.owner_user_id ?? 0), body: row.body,
+    createdAt: row.created_at,
+  }),
+  staff: row => ({
+    id: Number(row.id ?? 0), userId: Number(row.user_id ?? 0),
+    venueId: Number(row.venue_id ?? 0), role: row.role ?? "staff",
+    createdAt: row.created_at,
+  }),
+  memberships: row => ({
+    id: Number(row.id ?? 0), venueId: Number(row.venue_id ?? 0), name: row.name,
+    description: row.description ?? null, price: Number(row.price ?? 0).toFixed(2),
+    credits: Number(row.credits ?? 1), validityDays: Number(row.validity_days ?? 30),
+    active: row.active === true || row.active === "t", createdAt: row.created_at,
+  }),
+  memberAccounts: row => ({
+    id: Number(row.id ?? 0), customerAccountId: row.customer_account_id != null ? Number(row.customer_account_id) : null,
+    phone: row.phone ?? null, name: row.name,
+    membershipId: Number(row.membership_id ?? 0), creditsRemaining: Number(row.credits_remaining ?? 0),
+    expiresAt: row.expires_at ?? null, createdAt: row.created_at,
+  }),
+  waitlist: row => ({
+    id: Number(row.id ?? 0), venueId: Number(row.venue_id ?? 0), courtId: Number(row.court_id ?? 0),
+    playerDate: row.player_date, startHour: row.start_hour, endHour: row.end_hour,
+    playerName: row.player_name, contact: row.contact ?? null,
+    notified: row.notified === true || row.notified === "t", notifiedAt: row.notified_at ?? null,
+    createdAt: row.created_at,
+  }),
 };
 
 /** Reverse map: camelCase input → snake_case Postgres columns. */
@@ -96,9 +127,8 @@ const REVERSE: Record<string, Record<string, string>> = {
   bookings: {
     reference: "reference", courtId: "court_id", venueId: "venue_id", playerDate: "player_date",
     startHour: "start_hour", endHour: "end_hour", playerName: "player_name", contact: "contact",
-    customerAccountId: "customer_account_id", channel: "channel", paymentStatus: "payment_status",
-    paymentMethod: "payment_method", dayAmount: "day_amount", nightAmount: "night_amount",
-    totalAmount: "total_amount",
+    customerAccountId: "customer_account_id",     channel: "channel", paymentStatus: "payment_status", paymentMethod: "payment_method", dayAmount: "day_amount", nightAmount: "night_amount",
+    totalAmount: "total_amount", seriesId: "series_id", membershipId: "membership_id", seenByOwner: "seen_by_owner",
   },
   announcements: { venueId: "venue_id", title: "title", message: "message", active: "active", expireAt: "expire_at" },
   ownerCredentials: { username: "username", passwordHash: "password_hash", venueId: "venue_id" },
@@ -107,6 +137,11 @@ const REVERSE: Record<string, Record<string, string>> = {
   venueOwners: { userId: "user_id", venueId: "venue_id" },
   users: { openId: "open_id", name: "name", email: "email", loginMethod: "login_method", lastSignedIn: "last_signed_in", role: "role" },
   reviews: { venueId: "venue_id", playerName: "player_name", playerEmail: "player_email", rating: "rating", comment: "comment", bookingRef: "booking_ref" },
+  reviewReplies: { reviewId: "review_id", ownerUserId: "owner_user_id", body: "body" },
+  staff: { userId: "user_id", venueId: "venue_id", role: "role" },
+  memberships: { venueId: "venue_id", name: "name", description: "description", price: "price", credits: "credits", validityDays: "validity_days", active: "active" },
+  memberAccounts: { customerAccountId: "customer_account_id", phone: "phone", name: "name", membershipId: "membership_id", creditsRemaining: "credits_remaining", expiresAt: "expires_at" },
+  waitlist: { venueId: "venue_id", courtId: "court_id", playerDate: "player_date", startHour: "start_hour", endHour: "end_hour", playerName: "player_name", contact: "contact", notified: "notified", notifiedAt: "notified_at" },
 };
 
 function toSnake(table: string, input: Row): Row {

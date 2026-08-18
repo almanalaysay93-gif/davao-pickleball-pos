@@ -2,6 +2,7 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/lib/trpc";
+import { OwnerNotificationsBell } from "@/components/OwnerFeatureSections";
 import { CalendarDays, KeyRound, LayoutDashboard, Lock, Menu, ScrollText, X } from "lucide-react";
 import { ReactNode, useState } from "react";
 import { Link, useLocation } from "wouter";
@@ -82,6 +83,7 @@ export default function OwnerLayout({ children }: { children: ReactNode }) {
           <div className="flex items-center gap-2">
             {user && isOwner ? (
               <div className="flex items-center gap-2">
+                <OwnerNotificationsBell />
                 <span className="hidden md:flex items-center gap-2 text-sm text-slate-500">
                   <span className="max-w-36 truncate">{user.name ?? user.identity}</span>
                   <span className="px-1.5 py-0.5 rounded bg-slate-900 text-white text-xs font-medium">
@@ -136,6 +138,9 @@ export default function OwnerLayout({ children }: { children: ReactNode }) {
               System Admin
             </Link>
             )}
+            <div className="pt-2 mt-1 border-t border-slate-200 flex items-center">
+              <OwnerNotificationsBell />
+            </div>
           </nav>
         )}
       </header>

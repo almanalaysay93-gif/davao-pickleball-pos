@@ -2,6 +2,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { MapPin } from "lucide-react";
 import { useRef, useState } from "react";
 import { GalleryCarousel } from "@/components/GalleryCarousel";
+import { VenueRating } from "@/pages/Home";
 import { trpc } from "@/lib/trpc";
 
 /** Dedupe repeated place-name tokens so addresses like "Tugbok, Davao City, Tugbok, Davao City" collapse to "Tugbok, Davao City". */
@@ -77,12 +78,15 @@ export function VenueLocation({ venue, className, withGallery = true }: VenueLoc
 }
 
 /** The address/name/directions info row — used by both the combined card and the standalone map card. */
-export function VenueLocationInfo({ venue }: { venue: { name: string; address: string; district?: string | null } }) {
+export function VenueLocationInfo({ venue }: { venue: { id?: number; name: string; address: string; district?: string | null } }) {
   return (
     <div className="mt-3 flex items-start gap-2">
       <MapPin className="h-3.5 w-3.5 mt-0.5 shrink-0 text-accent" />
       <div className="min-w-0">
-        <p className="font-display font-semibold">{venue.name}</p>
+        <p className="font-display font-semibold flex items-center gap-1.5 flex-wrap">
+          {venue.name}
+          {typeof venue.id === "number" && <VenueRating venueId={venue.id} />}
+        </p>
         <p className="text-sm text-muted-foreground">{dedupeAddress(venue.address)}</p>
       </div>
       <a

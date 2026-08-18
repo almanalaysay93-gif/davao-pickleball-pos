@@ -16,6 +16,7 @@ import { useLocation, useSearch } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { usePageMeta } from "@/lib/meta";
 import { AnnouncementsBanner } from "@/components/AnnouncementsBanner";
+import { JoinWaitlistDialog } from "@/components/OwnerFeatureSections";
 import { VenueLocationMap, VenueGalleryHero } from "@/components/VenueLocation";
 
 type TimeFilter = "all" | "morning" | "afternoon" | "evening";
@@ -31,6 +32,7 @@ export default function Schedule() {
   const { data: venues } = trpc.venues.list.useQuery(undefined, { refetchOnWindowFocus: false });
 
   const [venueId, setVenueId] = useState<number | null>(initialVenueId ?? null);
+  const [waitlist, setWaitlist] = useState<{ courtId: number; hour: string } | null>(null);
 
   // Default to the first venue once the list has loaded.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -105,7 +107,13 @@ export default function Schedule() {
     const d = new Date(`${playerDate}T12:00:00`);
     d.setDate(d.getDate() + delta);
     setPlayerDate(format(d, "yyyy-MM-dd"));
+    setWaitlist(null);
   };
+
+  const waitlistVenueId = venueId ?? selectedVenue?.id ?? 0;
+  const waitlistCourt = waitlist
+    ? filtered?.courts.find(c => c.id === waitlist.courtId)
+    : undefined;
 
   const handleSelect = (courtId: number, hour: string) => {
     if (!filtered) return;
@@ -142,8 +150,8 @@ export default function Schedule() {
           Browse courts by date
         </h1>
         <p className="mt-3 text-muted-foreground leading-relaxed">
-          Pick a venue and a date to view the live hourly grid. Tap any open slot to start your
-          reservation.
+          Pick a venue and a date to view the live hourly grid. Tap an open slot to start your
+          reservation — tap a booked slot to join the waitlist instead.
         </p>
       </div>
 
@@ -234,14 +242,30 @@ export default function Schedule() {
               </CardContent>
             </Card>
           ) : (
-            <AvailabilityGrid
-              slots={filtered.slots}
-              courts={filtered.courts}
-              tiers={filtered.tiers}
-              selected={{ courtId: null, hour: null }}
-              onSelect={handleSelect}
-              interactive={false}
-            />
+            <>
+              <AvailabilityGrid
+                slots={filtered.slots}
+                courts={filtered.courts}
+                tiers={filtered.tiers}
+                selected={{ courtId: null, hour: null }}
+                onSelect={handleSelect}
+                interactive={false}
+                onFullSlot={(courtId, hour) => setWaitlist({ courtId, hour })}
+              />
+
+              {waitlist && waitlistVenueId && waitlistCourt && (
+                <JoinWaitlistDialog
+                  venueId={waitlistVenueId}
+                  courtId={waitlist.courtId}
+                  courtNumber={waitlistCourt.courtNumber}
+                  playerDate={playerDate}
+                  startHour={waitlist.hour}
+                  endHour={nextHour(waitlist.hour)}
+                  open={!!waitlist}
+                  onOpenChange={open => { if (!open) setWaitlist(null); }}
+                />
+              )}
+            </>
           )}
 
           <p className="mt-4 text-xs text-muted-foreground">

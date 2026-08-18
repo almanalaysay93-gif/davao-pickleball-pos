@@ -18,13 +18,15 @@ type Props = {
   onSelect: (courtId: number, hour: string) => void;
   /** If true, occupied slots can still be clicked to view details (read-only preview) */
   interactive?: boolean;
+  /** Called when an occupied slot is tapped and the player wants to waitlist instead of booking */
+  onFullSlot?: (courtId: number, hour: string) => void;
 };
 
 /**
  * Hourly availability grid: rows = courts, columns = hourly slots.
  * Daytime vs nighttime tier styling is baked into the column headers.
  */
-export default function AvailabilityGrid({ slots, courts, tiers, selected, onSelect, interactive = true }: Props) {
+export default function AvailabilityGrid({ slots, courts, tiers, selected, onSelect, interactive = true, onFullSlot }: Props) {
   const tierAt = (hour: string): "daytime" | "nighttime" | null => {
     const mins = toMin(hour);
     for (const t of tiers) {
@@ -89,8 +91,8 @@ export default function AvailabilityGrid({ slots, courts, tiers, selected, onSel
                   <td key={h} className="p-1 border-border/50">
                     <button
                       type="button"
-                      disabled={c.down || (occ && !interactive)}
-                      onClick={() => !c.down && onSelect(c.id, h)}
+                      disabled={c.down}
+                      onClick={() => !c.down && (occ && !interactive ? onFullSlot?.(c.id, h) : onSelect(c.id, h))}
                       className={cn(
                         "slot-cell w-full h-10 md:h-9 rounded-md text-xs md:text-[11px] font-medium border",
                         c.down

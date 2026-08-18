@@ -159,6 +159,11 @@ export async function listCourtsByVenue(venueId: number): Promise<CourtRow[]> {
   return q("courts").eq("venue_id", venueId).order("court_number").exec() as unknown as Promise<CourtRow[]>;
 }
 
+export async function listCourtsByIds(ids: number[]): Promise<CourtRow[]> {
+  if (ids.length === 0) return [];
+  return q("courts").in("id", ids).exec() as unknown as Promise<CourtRow[]>;
+}
+
 export async function listRateTiersByVenue(venueId: number): Promise<RateTierRow[]> {
   return q("rateTiers").eq("venue_id", venueId).exec() as unknown as Promise<RateTierRow[]>;
 }
@@ -622,4 +627,229 @@ export async function deleteReviewsAll() {
 /** Delete reviews whose player name starts with the given test prefix (safe, scoped cleanup). */
 export async function deleteReviewsByPlayerNamePrefix(prefix: string) {
   await q("reviews").like("player_name", `${prefix}%`).del();
+}
+
+/* ───────────── Review replies ───────────── */
+
+export interface ReviewReplyRow {
+  id: number; reviewId: number; ownerUserId: number; body: string; createdAt: unknown;
+}
+
+export async function createReviewReply(reviewId: number, ownerUserId: number, body: string): Promise<ReviewReplyRow> {
+  const rows = await q("reviewReplies").insert({ reviewId, ownerUserId, body: body.trim() });
+  return rows[0] as unknown as ReviewReplyRow;
+}
+
+export async function listRepliesForReviews(reviewIds: number[]): Promise<ReviewReplyRow[]> {
+  if (reviewIds.length === 0) return [];
+  return (await q("reviewReplies").in("review_id", reviewIds).order("created_at", { ascending: false }).exec()) as unknown as ReviewReplyRow[];
+}
+
+export async function deleteRepliesForReview(reviewId: number) {
+  await q("reviewReplies").eq("review_id", reviewId).del();
+}
+
+/* ───────────── Staff (multi-login per venue) ───────────── */
+
+export interface StaffRow {
+  id: number; userId: number; venueId: number; role: string; createdAt: unknown;
+}
+export interface StaffRowWithUser extends StaffRow {
+  userName: string | null; userEmail: string | null;
+}
+
+export async function addStaff(userId: number, venueId: number, role = "staff"): Promise<StaffRow> {
+  const rows = await q("staff").insert({ userId, venueId, role });
+  return rows[0] as unknown as StaffRow;
+}
+
+export async function removeStaff(userId: number, venueId: number) {
+  await q("staff").eq("user_id", userId).eq("venue_id", venueId).del();
+}
+
+export async function listVenueStaff(venueIds: number[]): Promise<StaffRowWithUser[]> {
+  if (venueIds.length === 0) return [];
+  const staffRows = (await q("staff").in("venue_id", venueIds).order("created_at", { ascending: true }).exec()) as unknown as StaffRow[];
+  const userIds = Array.from(new Set(staffRows.map(s => s.userId)));
+  const byId = new Map<number, { id: number; name: string | null; email: string | null }>();
+  // PostgREST `in` filters work best in modest batches.
+  for (let i = 0; i < userIds.length; i += 50) {
+    const users = (await q("users").select("id,name,email").in("id", userIds.slice(i, i + 50)).exec()) as unknown as Array<{ id: number; name: string | null; email: string | null }>;
+    for (const u of users) byId.set(u.id, u);
+  }
+  return staffRows.map(s => ({
+    ...s,
+    userName: byId.get(s.userId)?.name ?? null,
+    userEmail: byId.get(s.userId)?.email ?? null,
+  }));
+}
+
+export async function getStaff(userId: number, venueId: number): Promise<StaffRow | undefined> {
+  const rows = await q("staff").eq("user_id", userId).eq("venue_id", venueId).limit(1).exec();
+  return rows[0] as unknown as StaffRow | undefined;
+}
+
+/* ───────────── Memberships & member accounts ───────────── */
+
+export interface MembershipRow {
+  id: number; venueId: number; name: string; description: string | null; price: string;
+  credits: number; validityDays: number; active: boolean; createdAt: unknown;
+}
+
+export async function createMembership(data: { venueId: number; name: string; description?: string | null; price: string; credits?: number; validityDays?: number }): Promise<MembershipRow> {
+  const rows = await q("memberships").insert({
+    venueId: data.venueId, name: data.name, description: data.description ?? null,
+    price: data.price, credits: data.credits ?? 1, validityDays: data.validityDays ?? 30, active: true,
+  });
+  return rows[0] as unknown as MembershipRow;
+}
+
+export async function updateMembership(id: number, set: Record<string, unknown>) {
+  await q("memberships").eq("id", id).update(set);
+}
+
+export async function deleteMembership(id: number) {
+  await q("memberships").eq("id", id).del();
+}
+
+export async function listMembershipsByVenue(venueId: number): Promise<MembershipRow[]> {
+  return (await q("memberships").eq("venue_id", venueId).order("created_at", { ascending: true }).exec()) as unknown as MembershipRow[];
+}
+
+export interface MemberAccountRow {
+  id: number; customerAccountId: number | null; phone: string | null; name: string;
+  membershipId: number; creditsRemaining: number; expiresAt: string | null; createdAt: unknown;
+}
+
+export async function createMemberAccount(data: { name: string; phone?: string | null; membershipId: number }): Promise<MemberAccountRow> {
+  const membership = (await q("memberships").eq("id", data.membershipId).limit(1).exec()) as unknown as Array<MembershipRow>;
+  const plan = membership[0];
+  if (!plan) throw new Error("Membership plan not found");
+  const rows = await q("memberAccounts").insert({
+    name: data.name, phone: data.phone ?? null, membershipId: data.membershipId,
+    creditsRemaining: plan.credits,
+    expiresAt: new Date(Date.now() + plan.validityDays * 86400000).toISOString(),
+  });
+  return rows[0] as unknown as MemberAccountRow;
+}
+
+export async function listMemberAccountsByVenue(venueId: number): Promise<MemberAccountRow[]> {
+  const memberships = await listMembershipsByVenue(venueId);
+  if (memberships.length === 0) return [];
+  return (await q("memberAccounts").in("membership_id", memberships.map(m => m.id)).order("created_at", { ascending: false }).exec()) as unknown as MemberAccountRow[];
+}
+
+export async function listMembershipsWithAccounts(venueId: number): Promise<Array<MembershipRow & { memberCount: number; totalCreditsRemaining: number }>> {
+  const plans = await listMembershipsByVenue(venueId);
+  const accounts = await listMemberAccountsByVenue(venueId);
+  const byPlan: Record<number, { memberCount: number; totalCreditsRemaining: number }> = {};
+  for (const a of accounts) {
+    const p = byPlan[a.membershipId] ??= { memberCount: 0, totalCreditsRemaining: 0 };
+    p.memberCount += 1;
+    p.totalCreditsRemaining += a.creditsRemaining;
+  }
+  return plans.map(p => ({ ...p, memberCount: byPlan[p.id]?.memberCount ?? 0, totalCreditsRemaining: byPlan[p.id]?.totalCreditsRemaining ?? 0 }));
+}
+
+/** Redeem one credit for the account; returns {ok, newRemaining, expired}. */
+export async function redeemMemberCredit(accountId: number): Promise<{ ok: boolean; newRemaining: number; expired: boolean; membershipName: string }> {
+  const rows = (await q("memberAccounts").eq("id", accountId).limit(1).exec()) as unknown as MemberAccountRow[];
+  const account = rows[0];
+  if (!account) throw new Error("Member account not found");
+  if (account.expiresAt && new Date(account.expiresAt) < new Date()) {
+    return { ok: false, newRemaining: 0, expired: true, membershipName: "" };
+  }
+  if (account.creditsRemaining <= 0) return { ok: false, newRemaining: 0, expired: false, membershipName: "" };
+  const memberships = (await q("memberships").eq("id", account.membershipId).limit(1).exec()) as unknown as MembershipRow[];
+  await q("memberAccounts").eq("id", accountId).update({ creditsRemaining: account.creditsRemaining - 1 });
+  return { ok: true, newRemaining: account.creditsRemaining - 1, expired: false, membershipName: memberships[0]?.name ?? "" };
+}
+
+/* ───────────── Waitlist ───────────── */
+
+export interface WaitlistRow {
+  id: number; venueId: number; courtId: number; playerDate: string; startHour: string;
+  endHour: string; playerName: string; contact: string | null; notified: boolean; notifiedAt: string | null; createdAt: unknown;
+}
+
+export async function joinWaitlist(data: { venueId: number; courtId: number; playerDate: string; startHour: string; endHour: string; playerName: string; contact?: string | null }): Promise<WaitlistRow> {
+  const rows = await q("waitlist").insert({
+    venueId: data.venueId, courtId: data.courtId, playerDate: data.playerDate,
+    startHour: data.startHour, endHour: data.endHour, playerName: data.playerName,
+    contact: data.contact ?? null,
+  });
+  return rows[0] as unknown as WaitlistRow;
+}
+
+export async function removeFromWaitlist(id: number) {
+  await q("waitlist").eq("id", id).del();
+}
+
+export async function listWaitlistForSlot(venueId: number, courtId: number, playerDate: string, startHour: string, endHour: string): Promise<WaitlistRow[]> {
+  return (await q("waitlist")
+    .eq("venue_id", venueId).eq("court_id", courtId).eq("player_date", playerDate)
+    .eq("start_hour", startHour).eq("end_hour", endHour)
+    .order("created_at", { ascending: true }).exec()) as unknown as WaitlistRow[];
+}
+
+export interface WaitlistRowWithVenue extends WaitlistRow {
+  venueName: string; courtNumber: string;
+}
+export async function listWaitlistForVenue(venueId: number): Promise<WaitlistRowWithVenue[]> {
+  const venue = await getVenueById(venueId);
+  const venueName = venue?.name ?? `Venue #${venueId}`;
+  const rows = (await q("waitlist").eq("venue_id", venueId).order("created_at", { ascending: true }).exec()) as unknown as WaitlistRow[];
+  const courts = await listCourtsByVenue(venueId);
+  const byCourt = new Map(courts.map(c => [c.id, c.courtNumber]));
+  return rows.map(w => ({ ...w, venueName, courtNumber: byCourt.get(w.courtId) ?? String(w.courtId) }));
+}
+
+export async function listMyWaitlist(playerName: string): Promise<WaitlistRow[]> {
+  const term = playerName.trim();
+  if (!term) return [];
+  const rows = (await q("waitlist").order("created_at", { ascending: false }).limit(200).exec()) as unknown as WaitlistRow[];
+  return rows.filter(w => String(w.playerName ?? "").toLowerCase().includes(term.toLowerCase()));
+}
+
+export async function markWaitlistNotified(id: number) {
+  await q("waitlist").eq("id", id).update({ notified: true, notifiedAt: new Date().toISOString() });
+}
+
+/* ───────────── Owner notifications ───────────── */
+
+/** Unread new bookings (seen_by_owner = false) for venues the owner manages.
+ *  Only counts bookings from the last 7 days so historical data never floods the bell. */
+export async function countUnreadBookings(venueIds: number[]): Promise<number> {
+  if (venueIds.length === 0) return 0;
+  const since = new Date(Date.now() - 7 * 86400000).toISOString();
+  const rows = await q("bookings").select("id").in("venue_id", venueIds).eq("seen_by_owner", false).gte("created_at", since).execRaw();
+  return Array.isArray(rows) ? rows.length : 0;
+}
+
+export async function markBookingsSeen(venueIds: number[]) {
+  if (venueIds.length === 0) return;
+  await q("bookings").in("venue_id", venueIds).eq("seen_by_owner", false).update({ seenByOwner: true });
+}
+
+export interface UnreadBookingRow extends BookingRow {
+  venueName: string;
+  courtNumber: string | null;
+}
+export async function listUnreadBookings(venueIds: number[], limit = 20): Promise<UnreadBookingRow[]> {
+  if (venueIds.length === 0) return [];
+  const since = new Date(Date.now() - 7 * 86400000).toISOString();
+  const rows = (await q("bookings")
+    .in("venue_id", venueIds).eq("seen_by_owner", false).gte("created_at", since)
+    .order("created_at", { ascending: false }).limit(limit)
+    .exec()) as unknown as BookingRow[];
+  const venues = await listVenuesByIds(venueIds);
+  const byVenue = new Map(venues.map(v => [v.id, v.name]));
+  const courtIds = Array.from(new Set(rows.map(b => b.courtId)));
+  const courts = courtIds.length ? await listCourtsByIds(courtIds) : [];
+  const byCourt = new Map(courts.map(c => [c.id, c.courtNumber]));
+  return rows.map(b => ({
+    ...b,
+    venueName: byVenue.get(b.venueId) ?? `Venue #${b.venueId}`,
+    courtNumber: byCourt.get(b.courtId) ?? null,
+  }));
 }

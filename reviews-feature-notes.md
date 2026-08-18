@@ -140,3 +140,141 @@ REMAINING:
 - Delete seeded review id 142 after final checkpoint? Decision: keep for delivery so user sees the feature populated; mention they can remove it later. Actually better: DELETE before checkpoint (it's a QA artifact), user will see empty feed which is honest; the fix is in code. → DECIDE: delete review 142 after checkpoint to keep DB clean.
 - Then: checkpoint (auto-publish), push to GitHub, deliver message.
 - Master owner password for production is whatever was set in owner_credentials id 1 (username "owner") — user's browser session logs in fine.
+
+## Owner app feature inventory (Aug 17, for gap analysis reply)
+
+Customer app routes: / /courts /map /schedule /book /checkout /confirmation/:ref /my-bookings /booking-policy /customer-login
+Owner app routes: /owner-app (dashboard, tab=dashboard) /owner-app/bookings /owner-app/announcements /owner-app/admin (System Admin)
+
+Owner procedures (sort-unique from routers.ts grep): owner.myVenues, owner.courtsForVenue, owner.ratesForVenue, owner.announcements, owner.reviews, owner.bookings (reservations table), owner.createBooking (walk-in), owner.cancelBooking?, owner.postAnnouncement, admin.create/update/delete venue (globalAdminProcedure only — NOTE: individual owners CANNOT add venues/courts? "Add court" button exists per venue card — must be admin-only or per owner), admin.grantOwnership, admin.owners list (System Admin)
+
+Customer accounts: signup/login via email/password on /customer-login (separate from owner).
+
+Known missing (to tell user): SMS/email reminders (parked), owner replies to reviews, review stats on venue cards, recurring booking/membership, waitlist, multi-staff accounts per venue, payment gateway (currently cash + manual online), reports/analytics (daily revenue & occupancy was requested earlier but parked — check if implemented: dashboard has "Paid bookings/Pending/Revenue (paid)" mini-stats already), export CSV, court maintenance toggle exists (court status up/down), photos gallery via admin only.
+
+## Big feature batch (Aug 18): DB migration state
+
+User requested features 2,3,4,6,7,8,9,10: review replies, review stats on cards, per-venue owner self-service, reports+CSV, memberships/recurring, staff logins, waitlist, owner notification bell.
+
+TODO.md section "## Big feature batch: owner app upgrades (Aug 18)" added with all items.
+
+DDL executed in Supabase SQL Editor (browser session logged in as almanalaysay93-gif):
+- review_replies(review_id, owner_user_id, body, created_at)
+- staff(user_id, venue_id, role default 'staff', unique user_id+venue_id)
+- memberships(venue_id, name, description, price, credits, validity_days, active, created_at)
+- member_accounts(customer_account_id, phone, name, membership_id, credits_remaining, expires_at, created_at)
+- waitlist(venue_id, court_id, player_date, start_hour, end_hour, player_name, contact, notified, notified_at, created_at)
+- bookings: series_id TEXT, membership_id BIGINT, seen_by_owner BOOL DEFAULT false (added)
+Ran with "Run and enable RLS" (dialog appeared; app uses service role key so RLS is irrelevant for server reads).
+
+Supabase access facts: service key [REDACTED] works for PostgREST REST reads/writes. Management API rejects it (JWT decode fail). Direct Postgres (port 5432) unreachable from sandbox (IPv6-only host). DDL must be done via Supabase dashboard SQL editor in browser.
+
+Next steps: add table aliases + mappers in server/supa.ts for reviewReplies/staff/memberships/memberAccounts/waitlist; bookings REVERSE map needs seriesId/membershipId/seenByOwner; then db.ts helpers, then routers.ts procedures.
+
+## Implementation context (supa/routers/db) — Aug 18 big batch
+
+Tables CREATED + RLS enabled in Supabase (via dashboard SQL editor, logged in session almanalaysay93-gif): review_replies, staff, memberships, member_accounts, waitlist; bookings gained series_id, membership_id, seen_by_owner columns. Verified via REST swagger: all 16 paths present.
+
+DONE: supa.ts — TABLE_ALIASES + MAPS + REVERSE entries added for reviewReplies, staff, memberships, memberAccounts, waitlist; bookings REVERSE got seriesId/membershipId/seenByOwner.
+
+routers.ts key facts:
+- ownerProcedure (line 56): checks ctx.user.role==="owner"; ownsAllVenues = sessionVenueId null && type==="owner"; else ownedVenueIds from db.listOwnerVenueIds(ctx.user.id). Middleware adds ctx.ownsAllVenues/ownedVenueIds.
+- ownsVenue(ctx, venueId) (72); ownsVenuesList(ctx) (76).
+- globalAdminProcedure (22), adminProcedure (33), playerProcedure (41), customerAccountProcedure (48).
+- auth.ownerLogin (163): getOwnerCredentialByUsername -> verifyPassword -> setOwnerCookie(ctx.res, username, row.id, row.venueId ?? null).
+- owner router at line 571; owner.reviews at 720 ({rows, stats}).
+- public reviews router at 845: list/stats/create. reviews.create validates bookingRef via getBookingByReference + venue match.
+- db.ts: q("table").eq/insert/update/del pattern; deleteWhere exported. getVenueById, listCourtsByVenue, getCourtById, createBooking helpers exist; createBookingInput shared fn in routers (uses generateSlots).
+- bookings.create input = bookingInput z.object (venueId, courtId, playerDate, startHour, endHour, playerName, contact?, channel, paymentMethod?, customerAccountId?). createBookingInput() returns reference string.
+- routers.ts = 997 lines, db.ts = 625 lines.
+- setOwnerCookie/clearAuthCookies/setCustomerCookie in server/_core/cookies.
+
+Plan for new procedures: extend owner router with: replies.create/list (scoped), staff.list/add/remove, memberships CRUD + memberAccounts redemption, reports (revenue/occupancy range + csv as base64), notifications (unread count + list + markRead), booking.cancel triggers waitlist notify. Public router: reviews.replies.list (by reviewId, nested in reviews router), venues? stats already public — add venueStats to reviews.stats (already returns allVenueReviewStats map) — use in customer cards via venueReviewStats(venueId) client-side query.
+Waitlist: public waitlist.join/remove/myForVenue; owner waitlist.listForVenue (scoped).
+
+Browser SQL editor: https://supabase.com/dashboard/project/tfwyrbqygbhrkmlapxxu/sql/new (session persists; Run + RLS dialog pattern confirmed).
+
+## Big batch implementation state (Aug 18, checkpoint pending)
+
+DONE so far:
+1. DB tables (review_replies, staff, memberships, member_accounts, waitlist; bookings: series_id, membership_id, seen_by_owner) — created + RLS enabled via Supabase dashboard SQL editor.
+2. supa.ts: aliases + MAPS + REVERSE for reviewReplies, staff, memberships, memberAccounts, waitlist; bookings REVERSE: seriesId/membershipId/seenByOwner.
+3. db.ts: appended helpers — createReviewReply, listRepliesForReviews, deleteRepliesForReview; addStaff/removeStaff/listVenueStaff/getStaff; createMembership/update/delete, listMembershipsByVenue, createMemberAccount, listMemberAccountsByVenue, listMembershipsWithAccounts, redeemMemberCredit; waitlist: joinWaitlist/removeFromWaitlist/listWaitlistForSlot/listWaitlistForVenue/listMyWaitlist/markWaitlistNotified; notifications: countUnreadBookings/markBookingsSeen/listUnreadBookings.
+4. routers.ts: reviews.replies public query added. Owner router additions planned (replies/createReply/deleteReply, staff/add/remove, memberships/create/delete/sell/redeemCredit/membershipsPublic, reports (date range+csv), createSeries, waitlist/notifyWaitlist/dismissWaitlist, notifications/markNotificationsRead) — NOT YET APPLIED (edit failed due to file re-read; only the public replies addition succeeded).
+
+IMPORTANT remaining steps:
+- Apply the owner router additions via a new edit (read routers.ts owner router section 571-770 first; owner.reviews at line ~720; insert before "owner: list announcements").
+- Then: UI changes — OwnerReviewsFeed reply button + replies; VenueReviews public replies; review stats on Home/Courts/Map venue cards; owner UI: Reports tab, Memberships tab, Waitlist, notification bell in Owner.tsx header, Add venue/gallery for venue owners, staff management, recurring booking dialog in owner bookings.
+- Waitlist customer UI: join on full slot, My waitlist section on MyBookings page; notify when owner cancels (owner.cancel → listWaitlistForSlot → auto notify first entry).
+- Reports: owner.reports query returns {revenue, paidCount, pendingCount, totalBookings, days, csv}; UI = download CSV button (Blob link).
+- Recurring: owner.createSeries returns {seriesId, createdCount, skippedCount, skipped}; use seriesId in bookings insert via db.insertBooking({seriesId}).
+- Note: owner cancel procedure is at adminProcedure (cancel by id) — extend to also trigger waitlist notify via db.listWaitlistForSlot + markWaitlistNotified(first).
+- VenueReviews list: Confirmation.tsx already renders reviews — add replies rendering via trpc.reviews.replies.useQuery.
+- Tests: new specs for replies, staff scoping, waitlist, reports, memberships, recurring; keep scoped cleanup (prefix patterns), self-healing against parallel venueOwners wipe.
+- Final: typecheck, pnpm test (expect 90+ passing), visual QA desktop+mobile, checkpoint (auto-publish ON), push to GitHub.
+
+## Backend DONE (verified TSC_OK)
+
+All backend pieces are in place and typecheck clean:
+- supa.ts maps + db.ts helpers for reviewReplies/staff/memberships/memberAccounts/waitlist + bookings seriesId/membershipId/seenByOwner.
+- routers.ts public reviews.replies query; owner router: replies/createReply/deleteReply, staff/addStaff/removeStaff, memberships/createMembership/deleteMembership/sellMembership/membershipsPublic, reports (date range + csv), createSeries, waitlist/notifyWaitlist/dismissWaitlist, notifications/markNotificationsRead.
+- Note: grantVenueOwnership db helper exists; reviews.test.ts uses admin.grantOwnership tRPC for master tests and direct grantVenueOwnership for legacy users — pattern to follow in new tests.
+- Existing helpers: setRole(userId, role), listOwnerBookings(venueIds, {channel, limit}), generateReference().
+
+## NEXT: UI implementation (client/src)
+
+Key pages/components to modify:
+- client/src/components/OwnerReviewsFeed.tsx (owner feed) — add reply dialog (replies query from trpc.reviews.replies? NO — owner uses trpc.owner.replies). Show inline replies.
+- client/src/components/ReviewForm.tsx + pages with reviews list (Confirmation.tsx, Schedule.tsx?) — render replies via trpc.reviews.replies.useQuery({reviewIds}).
+- Venue cards with stats: client/src/pages/Home.tsx (venue card), Courts page venue cards, Map.tsx venue list — add ★ avg (n) chip using trpc.reviews.stats.query({venueId}).
+- Owner.tsx (owner dashboard): tabs/add sections for Reports (date range picker + CSV Blob download), Memberships (plans table + sell dialog), Staff (table add/remove by email), Waitlist (venue waitlist with notify/dismiss; auto-notify on owner.cancel via waitlist trigger), notification bell in header (poll trpc.owner.notifications every 10s).
+- Recurring booking: owner bookings panel add "Repeat weekly" dialog (weeks + weekdays + startHour/endHour + court + player) calling trpc.owner.createSeries.
+- Waitlist customer: on full slot show "Join waitlist" input (My Bookings page or Schedule); trpc.public waitlist.join needs a PUBLIC create endpoint — MUST ADD reviews-like public waitlist.create procedure + listMyWaitlist. Also owner.cancel should notify first waitlister.
+- Checkout: show membership plans at venue (trpc.membershipsPublic) with "Pay with membership" option — redeemCredit mutation; insert booking with membershipId.
+
+## Tests to write
+
+server/replies.test.ts, server/memberships.test.ts, server/waitlist.test.ts, server/reports-series.test.ts (or add to existing files). Follow reviews.test.ts patterns: scoped cleanup prefixes (e.g. "RTest", "MTest", "WTest", "STest" for staff), self-healing ownership grant retry (listOwnerVenueIds + grantVenueOwnership in retry loop), masterOwner test with ctx ownsAllVenues. Run `pnpm test` (expect all passing, ~90-100 tests). After: screenshots, checkpoint (auto-publish), push to GitHub.
+
+## UI implementation context (phase 2→3)
+
+Backend fully done (TSC_OK). DB defaults confirmed: bookings.seen_by_owner defaults false (hist rows false — gated unread count to last 7 days).
+
+OwnerReviewsFeed.tsx (client/src/components/OwnerReviewsFeed.tsx):
+- Props {venueIds: number[]}, queries trpc.owner.reviews.useQuery(undefined, 15s refetch), trpc.reviews.stats for per-venue aggregates (type assertion `as {rows, stats}`).
+- Renders aggregate chips (★ avg (count)) filtered by venueIds, loader, empty state, review cards with star array + bookingRef verified text + Manila time.
+- TO ADD: reply UI — query trpc.owner.replies.useQuery({venueId}) → replies list joined by reviewId; Reply button opens Dialog with textarea + submit (createReply) + edit/delete (deleteReply). Also pass reviewRows ids to public trpc.reviews.replies for customer-facing display.
+
+Customer reviews display: reviews listed via trpc.reviews.list({venueId}); add replies rendering using trpc.reviews.replies({reviewIds: reviews.map(r=>r.id)}).
+
+Venue card stats: use trpc.reviews.stats.query({venueId}) → {average,count}; add "★ 4.9 (12)" chip to venue cards (Home.tsx venue cards, Courts listing, Map.tsx grouped list).
+
+Owner.tsx dashboard structure (owner app single page, sections: stats, venues with courts/rates/announcements tables, Player reviews feed at bottom). Add tabs: Reports (start/end date pickers default last 30d, summary cards revenue/paid/pending/total, per-day table, Download CSV button via Blob), Memberships (venue select, plans table with memberCount/totalCredits, Add plan dialog {name,description,price,credits,validityDays}, Sell dialog {name,phone,membershipId}, delete plan), Staff (venue select, table user email+role, add staff by email dialog, remove), Waitlist (venue select, table player/date/court/contact/notifiedAt, notify/dismiss buttons), Notifications bell in header (poll trpc.owner.notifications, badge count, dropdown list, markRead on open), Recurring booking dialog in owner bookings panel (court, startHour/endHour, startDate, weeks, weekdays checkboxes, player name, contact, paymentMethod; result shows createdCount/skippedCount).
+
+Also owner venue self-service: Owner.tsx currently has "Add venue"/court/gallery under admin tabs — add an "Add new venue" button for any owner (calls venues.create? That's globalAdminProcedure — NEED CHANGE: create a new ownerProcedure venues.createOwner (name/address/district/surfaceType/openTime/closeTime/phone/description/courtCount/dayRate/nightRate/imageKey?) → inserts venue, courts, rate tiers, AND auto-creates owner credential row (insertOwnerCredential {username: name.toLowerCase(), venueId, hash of "Davao2026!"}) using db helpers createVenue + insertOwnerCredential + hashPassword. Note createVenue signature: (data, courtCount, rates) → {venueId...}.
+Also owner-facing gallery upload: venues.uploadGalleryImage is globalAdminProcedure — add ownerGalleryUpload ownerProcedure same base64 flow with ownership check.
+
+Per-venue owners must also see Owner.tsx sections per venue (already works — section per owned venue).
+
+Waitlist customer UI: Schedule/Book flow shows "Full" slot → add "Join waitlist" button opening dialog (playerName/contact). Use trpc.waitlist.join({venueId,courtId,playerDate,startHour,endHour,playerName,contact}). My Bookings page: add waitlist entries via trpc.waitlist.mine({playerName}).
+
+Checkout membership option: Checkout.tsx venueId → trpc.membershipsPublic({venueId}); "Pay with membership" dropdown of plans at venue → redeemCredit mutation (accountId from selected plan's member account — need customer to have member account; owner sells it). Checkout creates booking with membershipId → booking insert with membershipId col.
+
+Tests: write server/replies.test.ts, server/memberships.test.ts, server/waitlist.test.ts, server/reports-series.test.ts using reviews.test.ts patterns (scoped prefix cleanup, retry grantVenueOwnership in scoping tests, master tests use owner login with ctx ownsAllVenues).
+
+
+## Big batch state (Aug 17, session 2)
+DB DONE: tables created via Supabase dashboard SQL editor (browser): review_replies, staff, memberships, member_accounts, waitlist. bookings cols added: series_id, membership_id, seen_by_owner (default false). supa.ts mappings DONE (aliases + REVERSE for bookings new cols). db.ts helpers DONE: createReply/listReplies/deleteReply, createStaff/listStaff/deleteStaff, listMemberships/createMembership/updateMembership, createMemberAccount/redeemMemberCredit, createWaitlist/listWaitlist/cancelWaitlistEntry, countUnreadBookings/listUnreadBookings/markBookingsSeen (7-day gate), listBookingSeries/recurring logic.
+
+ROUTERS DONE: reviews.replies public query (reviewIds input), owner.replies.create/update/delete (scoped), owner.staff.create/delete/list, owner.memberships.* (CRUD), owner.series (recurring booking create with seriesId on bookings), owner.cancel auto-notifies first waitlister (forge notification), public waitlist.create, public bookings.cancel waitlist trigger, new online bookings leave seen_by_owner=false (bell).
+
+UI DONE SO FAR:
+- OwnerReviewsFeed.tsx: reply UI DONE (Reply btn, Dialog, update/edit, delete, existingReply map).
+- ReviewForm.tsx VenueReviews: public reply display DONE.
+- Home.tsx: exported VenueRating chip component (placed BEFORE export default Home), on directory cards.
+- Courts.tsx: VenueRating imported from Home, on listing cards + detail dialog.
+REMAINING UI:
+- Map.tsx: VenueRating next to venue names in accordion list.
+- Owner.tsx: Staff tab/section (create with username/password/role), Memberships tab (CRUD), Reports (daily + date-range revenue CSV export), Recurring booking option in booking flow, Waitlist panel (entries + notify), notification bell (top bar, badge from count query, mark read).
+- Customer: "Join waitlist" on full slots in Schedule grid (optional but in todo).
+NOTES: psql IPv6-only host (db host unreachable); DDL via browser SQL editor. Owner app route /owner-app. tsc clean. Suite 90/90 before this batch; add specs for staff/memberships/waitlist/replies after UI.

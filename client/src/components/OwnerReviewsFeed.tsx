@@ -1,6 +1,11 @@
+import { useState } from "react";
+import { toast } from "sonner";
 import { Card, CardContent } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Loader2, MessageSquareQuote, Star } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
+import { Loader2, MessageSquareQuote, MessageSquareReply, Reply as ReplyIcon, Star, Trash2 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 
 type ReviewRow = {
@@ -14,6 +19,14 @@ type ReviewRow = {
   createdAt: string | number | Date;
 };
 
+type ReplyRow = {
+  id: number;
+  reviewId: number;
+  ownerId: number;
+  body: string;
+  createdAt: string | number | Date;
+};
+
 /** Live feed of player reviews for the signed-in owner's venue(s). */
 export function OwnerReviewsFeed({ venueIds }: { venueIds: number[] }) {
   const reviews = trpc.owner.reviews.useQuery(undefined, {
@@ -21,6 +34,31 @@ export function OwnerReviewsFeed({ venueIds }: { venueIds: number[] }) {
     refetchInterval: 15000,
     select: (data: any) => data as { rows: ReviewRow[]; stats: { average: number; count: number } | null },
   });
+  const replies = trpc.owner.replies.useQuery(
+    venueIds.length === 1 ? { venueId: venueIds[0] } : undefined,
+    { enabled: venueIds.length > 0, select: (data: any) => data as { rows: ReviewRow[]; replies: ReplyRow[] } },
+  );
+  const utils = trpc.useUtils();
+  const [replyFor, setReplyFor] = useState<ReviewRow | null>(null);
+  const [replyBody, setReplyBody] = useState("");
+  const createReply = trpc.owner.createReply.useMutation({
+    onSuccess: () => {
+      toast.success("Reply posted — players will see it publicly");
+      setReplyFor(null);
+      void utils.owner.replies.invalidate();
+      void utils.owner.reviews.invalidate();
+    },
+    onError: e => toast.error(e.message),
+  });
+  const deleteReply = trpc.owner.deleteReply.useMutation({
+    onSuccess: () => {
+      toast.success("Reply removed");
+      void utils.owner.replies.invalidate();
+      void utils.owner.reviews.invalidate();
+    },
+    onError: e => toast.error(e.message),
+  });
+  const existingReply = (reviewId: number) => replies.data?.replies.find(r => r.reviewId === reviewId);
   const stats = trpc.reviews.stats.useQuery(undefined, {
     refetchOnWindowFocus: false,
     select: (data: any) => data as Record<number, { average: number; count: number }>,
@@ -91,8 +129,40 @@ export function OwnerReviewsFeed({ venueIds }: { venueIds: number[] }) {
                           ? `Verified booking #${r.bookingRef}`
                           : "Guest"}
                       </span>
+                      {!existingReply(r.id) && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 gap-1 text-xs text-muted-foreground hover:text-primary ml-auto"
+                          onClick={() => { setReplyFor(r); setReplyBody(""); }}>
+                          <MessageSquareReply className="h-3.5 w-3.5" /> Reply
+                        </Button>
+                      )}
                     </div>
                     <p className="mt-1 text-sm text-foreground/85">{r.comment}</p>
+                    {existingReply(r.id) && (
+                      <div className="mt-2 rounded-lg bg-accent/50 border border-accent px-3 py-2 text-xs">
+                        <div className="flex items-center gap-1.5 font-semibold text-accent-foreground">
+                          <ReplyIcon className="h-3.5 w-3.5" /> Owner replied
+                          <span className="ml-auto text-muted-foreground">
+                            {new Date(existingReply(r.id)!.createdAt as string).toLocaleString("en-US", { timeZone: "Asia/Manila", dateStyle: "medium", timeStyle: "short" })}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-foreground/85">{existingReply(r.id)!.body}</p>
+                        <div className="mt-1.5 flex justify-end">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 text-xs text-muted-foreground hover:text-destructive"
+                            onClick={() => {
+                              if (!confirm("Remove your reply to this review?")) return;
+                              deleteReply.mutate({ reviewId: r.id });
+                            }}>
+                            <Trash2 className="h-3 w-3" /> Remove reply
+                          </Button>
+                        </div>
+                      </div>
+                    )}
                     <p className="mt-1.5 text-xs text-muted-foreground">
                       {new Date(r.createdAt as string).toLocaleString("en-US", {
                         timeZone: "Asia/Manila",
@@ -107,6 +177,34 @@ export function OwnerReviewsFeed({ venueIds }: { venueIds: number[] }) {
           ))}
         </div>
       )}
+
+      {/* Reply dialog */}
+      <Dialog open={!!replyFor} onOpenChange={open => !open && setReplyFor(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Reply to {replyFor?.playerName}</DialogTitle>
+            <DialogDescription>
+              Your reply is shown publicly under the review, addressing the player for all future visitors.
+            </DialogDescription>
+          </DialogHeader>
+          <Textarea
+            value={replyBody}
+            onChange={e => setReplyBody(e.target.value)}
+            placeholder="Thanks for playing with us! …"
+            maxLength={1000}
+            className="min-h-28"
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setReplyFor(null)}>Cancel</Button>
+            <Button
+              disabled={createReply.isPending || replyBody.trim().length === 0}
+              onClick={() => createReply.mutate({ reviewId: replyFor!.id, body: replyBody.trim() })}>
+              {createReply.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+              Post reply
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

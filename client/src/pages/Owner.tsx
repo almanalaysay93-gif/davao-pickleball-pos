@@ -40,6 +40,14 @@ import { toast } from "sonner";
 import { Link, useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { OwnerReviewsFeed } from "@/components/OwnerReviewsFeed";
+import {
+  OwnerMembershipsSection,
+  OwnerNotificationsBell,
+  OwnerReportsSection,
+  OwnerSeriesDialog,
+  OwnerStaffSection,
+  OwnerWaitlistSection,
+} from "@/components/OwnerFeatureSections";
 
 export default function Owner() {
   const { user, loading: authLoading } = useAuth();
@@ -103,6 +111,7 @@ function OwnerDashboard() {
           paymentStatus: string;
         };
         venue: { id: number; name: string; address: string } | null;
+        courtNumber: string | null;
       }[],
   });
 
@@ -207,6 +216,18 @@ function OwnerDashboard() {
         <OwnerReviewsFeed venueIds={venuesList.map(v => v.id)} />
       </div>
 
+      {/* Team & staff */}
+      <OwnerStaffSection venueIds={venuesList.map(v => v.id)} />
+
+      {/* Reports & CSV export */}
+      <OwnerReportsSection venueIds={venuesList.map(v => v.id)} />
+
+      {/* Membership packages */}
+      <OwnerMembershipsSection venueIds={venuesList.map(v => v.id)} />
+
+      {/* Slot waitlist */}
+      <OwnerWaitlistSection venueIds={venuesList.map(v => v.id)} />
+
       {/* Bookings across owned venues */}
       <Card className="mt-10 border-border bg-card">
         <CardContent className="p-0">
@@ -220,6 +241,7 @@ function OwnerDashboard() {
               </span>
               <OwnerBookDialog />
               <OwnerWalkInDialog />
+              <OwnerSeriesDialog venues={venuesList} />
             </div>
           </div>
 
@@ -249,13 +271,13 @@ function OwnerDashboard() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {(bookings.data ?? []).map(({ booking, venue }) => (
+                  {(bookings.data ?? []).map(({ booking, venue, courtNumber }) => (
                     <TableRow key={booking.id}>
                       <TableCell className="font-mono text-xs font-semibold">
                         {booking.reference}
                       </TableCell>
                       <TableCell>{venue?.name ?? `#${booking.venueId}`}</TableCell>
-                      <TableCell>Court {booking.courtId}</TableCell>
+                      <TableCell>{courtNumber ?? `#${booking.courtId}`}</TableCell>
                       <TableCell>{booking.playerDate}</TableCell>
                       <TableCell className="whitespace-nowrap">
                         {formatHour(booking.startHour)} – {formatHour(booking.endHour)}
@@ -625,6 +647,7 @@ type BookingsQuery = {
       paymentStatus: string;
     };
     venue: { id: number; name: string; address: string } | null;
+    courtNumber: string | null;
   }[];
   isLoading: boolean;
 };
@@ -685,13 +708,13 @@ function OwnerBookingsSection({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {(bookings.data ?? []).map(({ booking, venue }) => (
+                  {(bookings.data ?? []).map(({ booking, venue, courtNumber }) => (
                     <TableRow key={booking.id}>
                       <TableCell className="font-mono text-xs font-semibold">
                         {booking.reference}
                       </TableCell>
                       <TableCell>{venue?.name ?? `#${booking.venueId}`}</TableCell>
-                      <TableCell>Court {booking.courtId}</TableCell>
+                      <TableCell>{courtNumber ?? `#${booking.courtId}`}</TableCell>
                       <TableCell>{booking.playerDate}</TableCell>
                       <TableCell className="whitespace-nowrap">
                         {formatHour(booking.startHour)} – {formatHour(booking.endHour)}
@@ -1149,10 +1172,16 @@ function RateRow({ tierId }: { tierId: number }) {
   return (
     <div className="flex items-center justify-between gap-2 rounded-md border border-border bg-muted/30 px-3 py-2">
       <div>
-        <span className="text-xs font-semibold capitalize">{tier?.tierName}</span>
-        <span className="ml-2 text-[11px] text-muted-foreground">
-          {formatHour(tier?.startHour ?? "")} – {formatHour(tier?.endHour ?? "")}
-        </span>
+        {tier ? (
+          <>
+            <span className="text-xs font-semibold capitalize">{tier.tierName}</span>
+            <span className="ml-2 text-[11px] text-muted-foreground">
+              {formatHour(tier.startHour)} – {formatHour(tier.endHour)}
+            </span>
+          </>
+        ) : (
+          <span className="inline-block h-3 w-24 rounded bg-muted animate-pulse" />
+        )}
       </div>
       <div className="flex items-center gap-2">
         <span className="text-sm font-semibold">{formatPHP(Number(tier?.pricePerHour ?? 0))}/hr</span>

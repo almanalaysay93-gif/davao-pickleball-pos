@@ -46,6 +46,20 @@ const highlights = [
   },
 ];
 
+/** Small "★ 4.9 (12)" chip shown on venue cards and listing rows. */
+export function VenueRating({ venueId }: { venueId: number }) {
+  const stats = trpc.reviews.stats.useQuery({ venueId }, { refetchOnWindowFocus: false });
+  const s = stats.data as { average: number; count: number } | undefined;
+  if (!s || s.count === 0) return null;
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-amber-400/15 text-amber-600 border border-amber-400/30 px-2 py-0.5 text-[11px] font-semibold whitespace-nowrap">
+      <span className="text-amber-500">★</span>
+      {s.average.toFixed(1)}
+      <span className="text-muted-foreground font-normal">({s.count})</span>
+    </span>
+  );
+}
+
 export default function Home() {
   const { data: venues, isLoading, error: venuesError } = trpc.venues.list.useQuery(undefined, {
     refetchOnWindowFocus: false,
@@ -240,9 +254,12 @@ export default function Home() {
                         </div>
                       )}
                       <div className="flex items-start justify-between gap-2">
-                        <h3 className="font-display text-lg font-semibold leading-tight group-hover:text-primary transition-colors">
-                          {v.name}
-                        </h3>
+                        <div className="flex items-start gap-1.5 min-w-0">
+                          <h3 className="font-display text-lg font-semibold leading-tight group-hover:text-primary transition-colors">
+                            {v.name}
+                          </h3>
+                          <VenueRating venueId={v.id} />
+                        </div>
                         <Badge variant="secondary" className="shrink-0">
                           {v.courtCount} {v.courtCount === 1 ? "court" : "courts"}
                         </Badge>
