@@ -4,7 +4,7 @@ import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router } from "./_core/trpc";
 import * as db from "./db";
 import { priceSlot, generateSlots } from "@shared/rates";
-import { storagePut } from "./storage";
+import { storageGet, storagePut } from "./storage";
 
 /** One-time alphanumeric password generated when a staff member is added. */
 function randomOneTimePassword(): string {
@@ -84,6 +84,25 @@ function ownsVenuesList(ctx: { ownsAllVenues: boolean } & Record<string, unknown
   return ctx.ownsAllVenues ? undefined : (ctx.ownedVenueIds as number[]);
 }
 
+/**
+ * Owner-scoped venue id resolution that stays correct for the master admin.
+ * The master admin (ownsAllVenues) gets every venue; venue-bound owners keep
+ * their session venue; legacy OAuth-sourced owners (role 'owner', type
+ * 'customer') stay scoped to their venueOwners rows — an empty list there is
+ * intentional and yields no data rather than system-wide data.
+ */
+async function ownedVenueIds(
+  ctx: { ownsAllVenues: boolean } & Record<string, unknown>,
+  venueId: number | undefined,
+): Promise<number[]> {
+  if (venueId) return [venueId];
+  if (ctx.ownsAllVenues) {
+    const venues = await db.listVenues();
+    return venues.map(v => v.id);
+  }
+  return ctx.ownedVenueIds as number[];
+}
+
 const bookingInput = z.object({
   venueId: z.number().int().positive(),
   courtId: z.number().int().positive(),
@@ -95,6 +114,7 @@ const bookingInput = z.object({
   channel: z.enum(["online", "walkin"]).default("online"),
   paymentMethod: z.string().max(32).optional(),
   customerAccountId: z.number().int().positive().optional(),
+  promoCodeId: z.number().int().positive().nullable().optional(),
 });
 
 type BookingInput = z.infer<typeof bookingInput>;
@@ -139,20 +159,55 @@ async function createBookingInput(input: BookingInput): Promise<string> {
 
   const tiers = await db.listRateTiersByVenue(input.venueId);
   const pricing = priceSlot(input.startHour, input.endHour, tiers);
-
   const reference = await db.generateReference();
+
+  // Apply promo code discount if provided
+  let promoCodeId: number | null = null;
+  let discountAmount = 0;
+  let finalTotal = pricing.total;
+  if (input.promoCodeId != null) {
+    const code = await db.getPromoCodeById(input.promoCodeId);
+    if (!code || Number(code.venueId) !== Number(input.venueId)) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "This promo code is not valid for this venue" });
+    }
+    if (!code.active) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "This promo code has been deactivated" });
+    }
+    const now = Date.now();
+    if (code.expiresAt && new Date(code.expiresAt).getTime() < now) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "This promo code has expired" });
+    }
+    if (code.maxUses != null && code.uses >= Number(code.maxUses)) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "This promo code has reached its usage limit" });
+    }
+    const amount = pricing.total;
+    if (code.minAmount != null && amount < Number(code.minAmount)) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: `Minimum booking amount is ₱${Number(code.minAmount).toFixed(2)}` });
+    }
+    if (code.discountPct != null) {
+      discountAmount = Math.round((amount * Number(code.discountPct)) / 100) / 100;
+    } else if (code.discountFlat != null) {
+      discountAmount = Number(code.discountFlat);
+    }
+    discountAmount = Math.min(discountAmount, amount);
+    finalTotal = Math.round((amount - discountAmount) * 100) / 100;
+    promoCodeId = code.id;
+    await db.bumpPromoCodeUses(code.id);
+  }
+
   await db.insertBooking({
     ...input,
     contact: input.contact ?? null,
     paymentMethod: input.paymentMethod ?? null,
     customerAccountId: input.customerAccountId ?? null,
+    promoCodeId,
+    discountAmount: String(discountAmount),
     reference,
     dayAmount: String(pricing.dayAmount),
     nightAmount: String(pricing.nightAmount),
-    totalAmount: String(pricing.total),
+    totalAmount: String(finalTotal),
     paymentStatus: input.paymentMethod ? "paid" : "pending",
   });
-
   return reference;
 }
 
@@ -409,6 +464,69 @@ export const appRouter = router({
       const tiers = await db.listRateTiersByVenue(input.venueId);
       return priceSlot(input.startHour, input.endHour, tiers);
     }),
+
+    /** Public: validate a promo code for a venue and compute the discounted total. */
+    applyPromoCode: publicProcedure
+      .input(
+        z.object({
+          venueId: z.number().int().positive(),
+          code: z.string().min(3).max(32).trim(),
+          amount: z.number().min(0),
+        }),
+      )
+      .query(async ({ input }) => {
+        const code = input.code.trim().toUpperCase();
+        const venue = await db.getVenueById(input.venueId);
+        if (!venue) {
+          return { valid: false as const, reason: "Unknown venue", discount: 0, newTotal: input.amount };
+        }
+        const rows = await db.listPromoCodesByVenueIds([input.venueId]);
+        const match = rows.find(c => c.code.toUpperCase() === code);
+        if (!match) {
+          return { valid: false as const, reason: "This promo code is not active at this venue", discount: 0, newTotal: input.amount };
+        }
+        if (!match.active) {
+          return { valid: false as const, reason: "This promo code has been deactivated", discount: 0, newTotal: input.amount };
+        }
+        const now = Date.now();
+        if (match.expiresAt && new Date(match.expiresAt).getTime() < now) {
+          return { valid: false as const, reason: "This promo code has expired", discount: 0, newTotal: input.amount };
+        }
+        if (match.maxUses != null && match.uses >= Number(match.maxUses)) {
+          return { valid: false as const, reason: "This promo code has reached its usage limit", discount: 0, newTotal: input.amount };
+        }
+        if (match.minAmount != null && input.amount < Number(match.minAmount)) {
+          return {
+            valid: false as const,
+            reason: `Minimum booking amount is ₱${Number(match.minAmount).toFixed(2)}`,
+            discount: 0,
+            newTotal: input.amount,
+          };
+        }
+        let discount = 0;
+        if (match.discountPct != null) {
+          discount = Math.round((input.amount * Number(match.discountPct)) / 100) / 100;
+        } else if (match.discountFlat != null) {
+          discount = Number(match.discountFlat);
+        }
+        discount = Math.min(discount, input.amount);
+        return { valid: true as const, reason: null as string | null, discount, newTotal: Math.round((input.amount - discount) * 100) / 100 };
+      }),
+    /** Public: resolve a valid promo code's id for checkout booking linkage. */
+    promoCodeId: publicProcedure
+      .input(
+        z.object({
+          venueId: z.number().int().positive(),
+          code: z.string().min(3).max(32).trim(),
+        }),
+      )
+      .query(async ({ input }) => {
+        const code = input.code.trim().toUpperCase();
+        const rows = await db.listPromoCodesByVenueIds([input.venueId]);
+        const match = rows.find(c => c.code.toUpperCase() === code);
+        if (!match || !match.active) return { id: 0 };
+        return { id: match.id };
+      }),
 
     /** Create a booking (walk-in or online). Guests can book; signed-in customers get their account linked. */
     create: publicProcedure.input(bookingInput).mutation(async ({ input, ctx }) => {
@@ -815,7 +933,7 @@ export const appRouter = router({
     staff: ownerProcedure
       .input(z.object({ venueId: z.number().int().positive().optional() }))
       .query(async ({ input, ctx }) => {
-        const ids = input?.venueId ? [input.venueId] : ownsVenuesList(ctx) ?? [];
+        const ids = await ownedVenueIds(ctx, input?.venueId);
         if (!ctx.ownsAllVenues && input?.venueId && !ownsVenue(ctx, input.venueId)) return [];
         return db.listVenueStaff(ids);
       }),
@@ -914,7 +1032,7 @@ export const appRouter = router({
         }),
       )
       .query(async ({ input, ctx }) => {
-        const ids = input?.venueId ? [input.venueId] : ownsVenuesList(ctx) ?? [];
+        const ids = await ownedVenueIds(ctx, input?.venueId);
         const rows = await db.listOwnerBookings(ids, { limit: 5000 });
         const scoped = rows.filter(b => ownsVenue(ctx, b.venueId) && b.playerDate >= input.start && b.playerDate <= input.end);
         const paid = scoped.filter(b => b.paymentStatus === "paid");
@@ -1004,7 +1122,7 @@ export const appRouter = router({
     notifications: ownerProcedure
       .input(z.object({ venueId: z.number().int().positive().optional() }))
       .query(async ({ input, ctx }) => {
-        const ids = input?.venueId ? [input.venueId] : ownsVenuesList(ctx) ?? [];
+        const ids = await ownedVenueIds(ctx, input?.venueId);
         const count = await db.countUnreadBookings(ids);
         const rows = await db.listUnreadBookings(ids, 20);
         return { count, rows: rows.filter(b => ownsVenue(ctx, b.venueId)) } as const;
@@ -1012,7 +1130,7 @@ export const appRouter = router({
     markNotificationsRead: ownerProcedure
       .input(z.object({ venueId: z.number().int().positive().optional() }))
       .mutation(async ({ input, ctx }) => {
-        const ids = input?.venueId ? [input.venueId] : ownsVenuesList(ctx) ?? [];
+        const ids = await ownedVenueIds(ctx, input?.venueId);
         await db.markBookingsSeen(ids);
         return { success: true } as const;
       }),
@@ -1024,9 +1142,7 @@ export const appRouter = router({
           .optional(),
       )
       .query(async ({ input, ctx }) => {
-        const ids = input?.venueId
-          ? [input.venueId]
-          : ownsVenuesList(ctx) ?? [];
+        const ids = await ownedVenueIds(ctx, input?.venueId);
         const rows = await db.listVenueAnnouncements(ids);
         return rows.filter(a => ownsVenue(ctx, a.venueId));
       }),
@@ -1038,6 +1154,9 @@ export const appRouter = router({
           title: z.string().min(1).max(160),
           message: z.string().min(1),
           expireAt: z.string().datetime().nullable().optional(),
+          photoUrl: z.string().max(512).nullable().optional(),
+          kind: z.enum(["announcement", "promotion", "event"]).default("announcement"),
+          eventDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
         }),
       )
       .mutation(async ({ input, ctx }) => {
@@ -1050,6 +1169,9 @@ export const appRouter = router({
           message: input.message.trim(),
           active: 1,
           expireAt: input.expireAt ? new Date(input.expireAt) : null,
+          photoUrl: input.photoUrl ?? null,
+          kind: input.kind,
+          eventDate: input.eventDate ?? null,
         });
         return { success: true } as const;
       }),
@@ -1062,11 +1184,14 @@ export const appRouter = router({
           message: z.string().min(1).optional(),
           active: z.number().int().min(0).max(1).optional(),
           expireAt: z.string().datetime().nullable().optional(),
+          photoUrl: z.string().max(512).nullable().optional(),
+          kind: z.enum(["announcement", "promotion", "event"]).optional(),
+          eventDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
         }),
       )
       .mutation(async ({ input, ctx }) => {
         const { id, ...patch } = input;
-        const all = await db.listVenueAnnouncements(ownsVenuesList(ctx) ?? []);
+        const all = await db.listVenueAnnouncements(await ownedVenueIds(ctx, undefined));
         const row = all.find(a => a.id === id);
         if (!row) {
           throw new TRPCError({ code: "FORBIDDEN", message: "This announcement is not at your venue" });
@@ -1076,6 +1201,9 @@ export const appRouter = router({
         if (patch.message !== undefined) set.message = patch.message.trim();
         if (patch.active !== undefined) set.active = patch.active;
         if (patch.expireAt !== undefined) set.expireAt = patch.expireAt ? new Date(patch.expireAt) : null;
+        if (patch.photoUrl !== undefined) set.photoUrl = patch.photoUrl;
+        if (patch.kind !== undefined) set.kind = patch.kind;
+        if (patch.eventDate !== undefined) set.eventDate = patch.eventDate;
         await db.updateAnnouncement(id, set);
         return { success: true } as const;
       }),
@@ -1083,12 +1211,128 @@ export const appRouter = router({
     deleteAnnouncement: ownerProcedure
       .input(z.object({ id: z.number().int().positive() }))
       .mutation(async ({ input, ctx }) => {
-        const all = await db.listVenueAnnouncements(ownsVenuesList(ctx) ?? []);
+        const all = await db.listVenueAnnouncements(await ownedVenueIds(ctx, undefined));
         const row = all.find(a => a.id === input.id);
         if (!row) {
           throw new TRPCError({ code: "FORBIDDEN", message: "This announcement is not at your venue" });
         }
         await db.deleteAnnouncement(input.id);
+        return { success: true } as const;
+      }),
+
+    /** Owner: upload a promo image (stores to S3, returns the URL to use as announcement photoUrl). */
+    uploadPromoImage: ownerProcedure
+      .input(
+        z.object({
+          venueId: z.number().int().positive(),
+          fileName: z.string().min(1).max(255),
+          mimeType: z.string().regex(/^image\/(png|jpe?g|webp)$/),
+          base64: z.string().min(1),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        if (!ownsVenue(ctx, input.venueId)) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "You do not own this venue" });
+        }
+        const safeName = input.fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
+        const key = `promo-images/${input.venueId}-${Date.now()}-${safeName}`;
+        const buffer = Buffer.from(input.base64, "base64");
+        if (buffer.length > 8 * 1024 * 1024) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Image must be under 8 MB" });
+        }
+        const { key: storedKey } = await storagePut(key, buffer, input.mimeType);
+        const { url: imageUrl } = await storageGet(storedKey);
+        return { success: true, imageKey: storedKey, imageUrl } as const;
+      }),
+
+    /** Owner: promo code management for owned venues. */
+    promoCodes: ownerProcedure
+      .input(
+        z
+          .object({ venueId: z.number().int().positive().optional() })
+          .optional(),
+      )
+      .query(async ({ input, ctx }) => {
+        const ids = input?.venueId
+          ? [input.venueId]
+          : ownsVenuesList(ctx) ?? (await db.listVenues()).map(v => v.id);
+        const rows = await db.listPromoCodesByVenueIds(ids);
+        return rows.filter(c => ownsVenue(ctx, c.venueId));
+      }),
+
+    createPromoCode: ownerProcedure
+      .input(
+        z.object({
+          venueId: z.number().int().positive(),
+          code: z.string().min(3).max(32).regex(/^[A-Za-z0-9_-]+$/),
+          discountPct: z.number().min(0).max(100).nullable().optional(),
+          discountFlat: z.number().min(0).nullable().optional(),
+          minAmount: z.number().min(0).nullable().optional(),
+          maxUses: z.number().int().min(1).nullable().optional(),
+          expiresAt: z.string().datetime().nullable().optional(),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        if (!ownsVenue(ctx, input.venueId)) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "You do not own this venue" });
+        }
+        if (input.discountPct == null && input.discountFlat == null) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Set either a percentage or a flat discount" });
+        }
+        const existing = (await db.listPromoCodesByVenueIds([input.venueId])).find(
+          c => c.code.toLowerCase() === input.code.toLowerCase(),
+        );
+        if (existing) {
+          throw new TRPCError({ code: "CONFLICT", message: "A promo code with this code already exists at this venue" });
+        }
+        await db.createPromoCode({
+          venueId: input.venueId,
+          code: input.code.toUpperCase(),
+          discountPct: input.discountPct != null ? String(input.discountPct) : null,
+          discountFlat: input.discountFlat != null ? String(input.discountFlat) : null,
+          minAmount: input.minAmount != null ? String(input.minAmount) : null,
+          maxUses: input.maxUses ?? null,
+          expiresAt: input.expiresAt ? new Date(input.expiresAt) : null,
+          active: 1,
+        });
+        return { success: true } as const;
+      }),
+
+    updatePromoCode: ownerProcedure
+      .input(
+        z.object({
+          id: z.number().int().positive(),
+          active: z.number().int().min(0).max(1).optional(),
+          maxUses: z.number().int().min(1).nullable().optional(),
+          minAmount: z.number().min(0).nullable().optional(),
+          expiresAt: z.string().datetime().nullable().optional(),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        const { id, ...patch } = input;
+        const all = await db.listPromoCodesByVenueIds(await ownedVenueIds(ctx, undefined));
+        const row = all.find(c => c.id === id);
+        if (!row) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "This promo code is not at your venue" });
+        }
+        const set: Record<string, unknown> = {};
+        if (patch.active !== undefined) set.active = patch.active;
+        if (patch.maxUses !== undefined) set.maxUses = patch.maxUses;
+        if (patch.minAmount !== undefined) set.minAmount = patch.minAmount ?? null;
+        if (patch.expiresAt !== undefined) set.expiresAt = patch.expiresAt ? new Date(patch.expiresAt) : null;
+        await db.updatePromoCode(id, set);
+        return { success: true } as const;
+      }),
+
+    deletePromoCode: ownerProcedure
+      .input(z.object({ id: z.number().int().positive() }))
+      .mutation(async ({ input, ctx }) => {
+        const all = await db.listPromoCodesByVenueIds(await ownedVenueIds(ctx, undefined));
+        const row = all.find(c => c.id === input.id);
+        if (!row) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "This promo code is not at your venue" });
+        }
+        await db.deletePromoCode(input.id);
         return { success: true } as const;
       }),
   }),

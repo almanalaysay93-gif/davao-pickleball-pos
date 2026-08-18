@@ -101,6 +101,8 @@ export const bookings = mysqlTable("bookings", {
   dayAmount: decimal("dayAmount", { precision: 10, scale: 2 }).default("0"),
   nightAmount: decimal("nightAmount", { precision: 10, scale: 2 }).default("0"),
   totalAmount: decimal("totalAmount", { precision: 10, scale: 2 }).notNull(),
+  promoCodeId: int("promoCodeId"), // promo_codes.id when a promo code was applied
+  discountAmount: decimal("discountAmount", { precision: 10, scale: 2 }).default("0"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
@@ -132,6 +134,9 @@ export const announcements = mysqlTable("announcements", {
   message: text("message").notNull(),
   active: int("active").notNull().default(1), // 1 = visible, 0 = hidden
   expireAt: timestamp("expireAt"), // null = no expiry
+  photoUrl: varchar("photoUrl", { length: 512 }), // promo image
+  kind: varchar("kind", { length: 16 }).notNull().default("announcement"), // announcement | promotion | event
+  eventDate: varchar("eventDate", { length: 10 }), // YYYY-MM-DD for events
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
@@ -171,3 +176,24 @@ export const ownerCredentials = mysqlTable("ownerCredentials", {
 
 export type OwnerCredential = typeof ownerCredentials.$inferSelect;
 export type InsertOwnerCredential = typeof ownerCredentials.$inferInsert;
+
+/**
+ * Promo codes: owner-defined discount codes redeemable at checkout
+ * for that venue (percentage or flat discount, min amount, max uses, expiry).
+ */
+export const promoCodes = mysqlTable("promoCodes", {
+  id: int("id").autoincrement().primaryKey(),
+  venueId: int("venueId").notNull(),
+  code: varchar("code", { length: 32 }).notNull().unique(), // uppercase alphanumeric + _ -
+  discountPct: decimal("discountPct", { precision: 6, scale: 2 }), // 0-100
+  discountFlat: decimal("discountFlat", { precision: 10, scale: 2 }), // fixed peso discount
+  minAmount: decimal("minAmount", { precision: 10, scale: 2 }),
+  maxUses: int("maxUses"),
+  uses: int("uses").notNull().default(0),
+  active: int("active").notNull().default(1),
+  expiresAt: timestamp("expiresAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type PromoCode = typeof promoCodes.$inferSelect;
+export type InsertPromoCode = typeof promoCodes.$inferInsert;

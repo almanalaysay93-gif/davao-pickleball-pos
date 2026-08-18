@@ -25,6 +25,7 @@ const TABLE_ALIASES: Record<string, string> = {
   venueOwners: "venue_owners", users: "users", reviews: "reviews",
   reviewReplies: "review_replies", staff: "staff", memberships: "memberships",
   memberAccounts: "member_accounts", waitlist: "waitlist",
+  promoCodes: "promo_codes",
 };
 
 /** Map snake_case Postgres rows to the camelCase field names the routers expect. */
@@ -51,11 +52,23 @@ const MAPS: Record<string, (row: Row) => Row> = {
     playerName: row.player_name, contact: row.contact, customerAccountId: row.customer_account_id,
     channel: row.channel, paymentStatus: row.payment_status, paymentMethod: row.payment_method,
     dayAmount: row.day_amount, nightAmount: row.night_amount, totalAmount: row.total_amount,
+    promoCodeId: row.promo_code_id ?? null, discountAmount: String(row.discount_amount ?? 0),
     createdAt: row.created_at,
   }),
   announcements: row => ({
     id: row.id, venueId: row.venue_id, title: row.title, message: row.message,
-    active: row.active, expireAt: row.expire_at, createdAt: row.created_at, updatedAt: row.updated_at,
+    active: row.active, expireAt: row.expire_at, photoUrl: row.photo_url ?? null,
+    kind: row.kind ?? "announcement", eventDate: row.event_date ?? null,
+    createdAt: row.created_at, updatedAt: row.updated_at,
+  }),
+  promoCodes: row => ({
+    id: Number(row.id ?? 0), venueId: Number(row.venue_id ?? 0), code: row.code ?? "",
+    discountPct: row.discount_pct != null ? String(row.discount_pct) : null,
+    discountFlat: row.discount_flat != null ? String(row.discount_flat) : null,
+    minAmount: row.min_amount != null ? String(row.min_amount) : null,
+    maxUses: row.max_uses != null ? Number(row.max_uses) : null,
+    uses: Number(row.uses ?? 0), active: row.active, expiresAt: row.expires_at ?? null,
+    createdAt: row.created_at,
   }),
   ownerCredentials: row => ({
     id: row.id, username: row.username, passwordHash: row.password_hash,
@@ -128,9 +141,10 @@ const REVERSE: Record<string, Record<string, string>> = {
     reference: "reference", courtId: "court_id", venueId: "venue_id", playerDate: "player_date",
     startHour: "start_hour", endHour: "end_hour", playerName: "player_name", contact: "contact",
     customerAccountId: "customer_account_id",     channel: "channel", paymentStatus: "payment_status", paymentMethod: "payment_method", dayAmount: "day_amount", nightAmount: "night_amount",
-    totalAmount: "total_amount", seriesId: "series_id", membershipId: "membership_id", seenByOwner: "seen_by_owner",
+    totalAmount: "total_amount", promoCodeId: "promo_code_id", discountAmount: "discount_amount", seriesId: "series_id", membershipId: "membership_id", seenByOwner: "seen_by_owner",
   },
-  announcements: { venueId: "venue_id", title: "title", message: "message", active: "active", expireAt: "expire_at" },
+  announcements: { venueId: "venue_id", title: "title", message: "message", active: "active", expireAt: "expire_at", photoUrl: "photo_url", kind: "kind", eventDate: "event_date" },
+  promoCodes: { venueId: "venue_id", code: "code", discountPct: "discount_pct", discountFlat: "discount_flat", minAmount: "min_amount", maxUses: "max_uses", uses: "uses", active: "active", expiresAt: "expires_at" },
   ownerCredentials: { username: "username", passwordHash: "password_hash", venueId: "venue_id" },
   customerAccounts: { email: "email", name: "name", passwordHash: "password_hash" },
   venueGallery: { venueId: "venue_id", imageKey: "image_key", sortOrder: "sort_order" },

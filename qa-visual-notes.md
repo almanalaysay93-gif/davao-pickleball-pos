@@ -87,3 +87,48 @@ Other key shapes (verified):
 - createSeries weekdays 0-6, startDate field (NOT playerDate), returns { seriesId, createdCount, skippedCount, skipped[] }.
 - owner.notifications({ venueId? }) returns { count, rows[] with courtNumber now }.
 - staff query: owner.staff({ venueId? }) returns rows with userId field (listVenueStaff enriched).
+
+
+## Promo toolkit session notes (2026-08-18)
+- Production DB = Supabase Postgres (tfwyrbqygbhrkmlapxxu). MySQL is NOT used at runtime.
+- supa.ts connects via SUPABASE_URL env (defaults https://tfwyrbqygbhrkmlapxxu.supabase.co) with SUPABASE_SERVICE_ROLE_KEY which is an sb_ secret (NOT a JWT) → PostgREST Bearer auth FAILS (401), but anon apikey+RLS allows READS and WRITES on announcements (RLS permissive — verified INSERT/DELETE 201/204 via anon curl).
+- Sandbox has NO IPv4 route to db host and no IPv6 routing → direct Postgres connection (5432/6543) fails ("Network is unreachable"). DDL cannot be applied from this sandbox.
+- CONSEQUENCE: announcements table currently has: id, venue_id, title, message, active, expire_at, created_at, updated_at. CANNOT add photo_url/kind/event_date columns to Postgres from here.
+- PROMOCODES table cannot be created in Postgres from here either. MySQL got it via webdev_execute_sql but that DB is not used at runtime.
+- SOLUTION CHOSEN: store promotions as JSON in the existing `message`? No — cleaner: create a `venue_gallery`-like approach using existing `venue_gallery` table (already exists w/ image_key, venue_id, sort_order, active) for promo images, and use announcement kind encoded via title prefix is hacky.
+- REAL SOLUTION: implement promotion features WITHOUT new Postgres columns:
+  1. Promo images → reuse venue_gallery table (has imageKey/url already; images on venue page already exist — add a "promotions" mode in gallery? risky mixing). Alternative: use announcement rows as-is + S3-hosted images referenced via message-embedded URL? The announcement message is text only.
+  2. Best: add feature without schema: announcements get a companion "promo_cards" concept stored in venue description? No.
+  - DECISION: Try Postgres DDL via Supabase Management API needs PAT from user (not provided). OR use the supabase client `rpc` with `pg_net`? no.
+  - Check `scripts/supabase-schema.sql` + `scripts/migrate-rest.mjs` in repo — that migration previously applied schema changes to Postgres FROM THIS SANDBOX (it succeeded before). Inspect how it connected!
+- Anon INSERT on announcements WORKS (id 146 created & deleted OK). RLS permissive.
+- storagePut works (gallery upload pattern at routers.ts:235-260: base64 input, venue-gallery/<venueId>-<ts>-<name> key).
+
+## 2026-08-18 08:20 — PROMO TOOLKIT SCHEMA DONE
+User ran SQL in Supabase SQL Editor ("Run and enable RLS"):
+- announcements +photo_url VARCHAR(512), +kind VARCHAR(16) default 'announcement', +event_date DATE
+- promo_codes table created with RLS enabled
+Verified via anon curl: announcements select with new fields = 200 []; promo_codes exists (200).
+Backend done: db.ts (PromoCodeRow + helpers; AnnouncementRow extended) and supa.ts (promoCodes alias, announcements map w/ photoUrl/kind/eventDate, REVERSE mappings).
+Next steps:
+1. Update routers.ts: owner.announcements.create/update accept photoUrl, kind, eventDate; owner.promoCodes list/create/update/delete + public promoCodes.apply (via code lookup, no auth needed? apply should be public so checkout can validate).
+2. Photo upload: extend owner.uploadGallery? Better: owner.uploadAnnouncementPhoto (base64 input, storage key promo-<venueId>-ts, returns url) — reuse storagePut pattern.
+3. Share links: public announcement list includes venue name for share text (compute shareUrl: /schedule?venueId=X + announcement id? simple: title+message text share; no permalinks needed).
+4. Checkout: checkout router totals computed server-side — apply promo code in checkout.apply? Check how booking creation computes totalAmount (rates db.lookup). Add owner.promoCodes.apply public: { venueId, code, amount } → { discount, valid, reason }.
+5. Owner UI: Owner.tsx announcements section extended (Photo upload, Expiry date, Kind toggle Announcement/Event, Event date). New PromoCodesManager component in OwnerFeatureSections.tsx (list/add/edit/delete; show uses/maxUses, active toggle).
+6. Customer UI: Schedule page venue header: show promo gallery cards (announcements with photoUrl + kind=promotion) + event badges; announcements cards show share button (web share API + WhatsApp/Facebook fallback links).
+7. Tests + checkpoint.
+
+## 2026-08-18 08:30 — PROMO BACKEND DONE
+Typecheck clean. routers.ts now has:
+- owner.createAnnouncement/updateAnnouncement: accept photoUrl (max512 nullable), kind enum announcement|promotion|event (default announcement), eventDate (YYYY-MM-DD nullable).
+- owner.uploadPromoImage (ownerProcedure): base64 input → storagePut promo-images/<venueId>-ts-name → returns {success, imageKey, imageUrl}. storageGet imported from ./storage (returns {key,url}).
+- owner.promoCodes.query / createPromoCode / updatePromoCode(active,maxUses,expiresAt) / deletePromoCode — all ownerProcedure + ownsVenue scoping; create validates discountPct OR discountFlat required, code uniqueness per venue (case-insensitive), stores code uppercased.
+- NOTE: promo codes live in Postgres promo_codes (RLS-enabled). PostgREST reads via service-role key (sb_ secret) — writes must work via apikey? No — q() uses supa.createClient(SUPA_URL, svcKey) — svc key sent as Bearer fails 401 BUT .insert().select("*").throwOnError() would fail! VERIFY: earlier anon INSERT worked; the runtime may pass? The sb_ secret is invalid JWT. Risk: promo code CRUD could 401 at runtime. Same pattern exists for memberships (which worked in production per earlier QA — memberships tables created via webdev_execute_sql?? earlier "8 features" worked, so runtime writes DO succeed — meaning svc key actually works or RLS allows anon writes. memberships.create worked in QA (user sold memberships). OK proceed.)
+
+REMAINING:
+1. Add bookings.applyPromoCode publicProcedure (under bookings router? currently bookings at line ~130 createBooking uses priceSlot; checkout = bookings.createBooking flow around line 130-155 and walkin ~960). Apply endpoint: input { venueId, code, amount } → finds active code at venue, checks expiry, uses, minAmount, returns {valid, discount, reason, newTotal}. Also add promoCodeId to booking row? Simplest: at checkout pass promoCodeId; createBooking input already has optional membershipId — add promoCodeId optional, store in bookings.promo_code_id? NO NEW COLUMN possible. Store as JSON-ish: skip column; apply discount server-side and record code in booking via... no column. Compromise: store code in bookings.reference? NO. Store in bookings.channel? NO. Simplest safe: don't persist code on booking row; record discount in message? No. DECISION: Add promo code lookup at checkout time only — booking rows get totalAmount with discount applied, and promoCodeId stored nowhere (acceptable for v1). Actually we CAN bump uses: applyPromoCode should bump uses on use during booking creation. To avoid double-bump, bump uses in createBooking when promoCodeId provided → still needs column to reference which code... Alternative: bump uses inside applyPromoCode only when "confirmed" — can't know. Compromise: apply endpoint returns valid but does NOT bump; owner creates codes; uses bumped when checkout completes: since we have no column, skip uses tracking (uses remains 0) — acceptable, maxUses enforcement done at apply-time by reading uses+1? No. FINAL: add promo_code lookup only; skip bumping/uses. Document limit.
+2. Owner UI: extend Owner.tsx announcement editor (photo upload via owner.uploadPromoImage, kind select, eventDate). Add PromoCodesManager section to OwnerFeatureSections.tsx + wire in OwnerDashboard (tabs: Staff, Reports, Memberships, Waitlist, + Promo Codes).
+3. Customer UI: Schedule.tsx venue area — show promotion announcements (kind=promotion with photoUrl) as cards above schedule; event announcements (kind=event with eventDate) shown as event badges; announcement card Share button (navigator.share + WhatsApp/FB fallback); also home/venue cards? Keep to schedule page + maybe Home announcements strip.
+4. Tests: add to server/feature-batch.test.ts (promo create/duplicate/apply), run pnpm test.
+5. Checkpoint + deliver.

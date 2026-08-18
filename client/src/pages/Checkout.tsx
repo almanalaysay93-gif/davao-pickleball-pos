@@ -4,8 +4,8 @@ import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { formatHour, formatPHP } from "@shared/rates";
 import { Badge } from "@/components/ui/badge";
-import { BadgeCheck, CreditCard, Landmark, Moon, ReceiptText, Smartphone, Sun } from "lucide-react";
-import { useState } from "react";
+import { BadgeCheck, Check, CreditCard, Landmark, Loader2, Moon, ReceiptText, Smartphone, Sun, Tag, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
@@ -22,6 +22,12 @@ export default function Checkout() {
   const { draft, setDraft } = useBooking();
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [submitting, setSubmitting] = useState(false);
+  const [promoCode, setPromoCode] = useState("");
+  const [appliedPromo, setAppliedPromo] = useState<{
+    codeId: number;
+    code: string;
+    discount: number;
+  } | null>(null);
 
   const createBooking = trpc.bookings.create.useMutation({
     onSuccess: res => {
@@ -66,8 +72,82 @@ export default function Checkout() {
       contact: draft.contact ?? undefined,
       channel,
       paymentMethod,
+      promoCodeId: appliedPromo?.codeId ?? null,
     });
   };
+
+  // ── Promo code validation ────────────────────────────────────────────────
+  const promoCheck = trpc.bookings.applyPromoCode.useQuery(
+    {
+      venueId: draft.venueId!,
+      code: promoCode.trim().toUpperCase(),
+      amount: Number(draft.total ?? 0),
+    },
+    {
+      enabled: promoCode.trim().length >= 3 && promoCode.trim().toUpperCase() !== appliedPromo?.code,
+      refetchOnWindowFocus: false,
+    },
+  );
+  const promoDebounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const [checkingCode, setCheckingCode] = useState("");
+  const [lastCheckValid, setLastCheckValid] = useState<boolean | null>(null);
+  const [lastCheckReason, setLastCheckReason] = useState<string | null>(null);
+  const [lastCheckDiscount, setLastCheckDiscount] = useState(0);
+
+  useEffect(() => {
+    const code = promoCode.trim().toUpperCase();
+    if (code === appliedPromo?.code) return;
+    if (code.length < 3) {
+      setCheckingCode("");
+      setLastCheckValid(null);
+      setLastCheckReason(null);
+      return;
+    }
+    clearTimeout(promoDebounce.current);
+    promoDebounce.current = setTimeout(() => setCheckingCode(code), 500);
+    return () => clearTimeout(promoDebounce.current);
+  }, [promoCode, appliedPromo?.code]);
+
+  useEffect(() => {
+    if (!checkingCode) return;
+    if (promoCheck.data) {
+      setLastCheckValid(promoCheck.data.valid);
+      setLastCheckReason(promoCheck.data.reason);
+      setLastCheckDiscount(promoCheck.data.discount);
+    }
+  }, [promoCheck.data, checkingCode]);
+
+  const applyPromo = () => {
+    const code = promoCode.trim().toUpperCase();
+    if (!code || !promoCheck.data) return;
+    if (!promoCheck.data.valid) {
+      toast.error(promoCheck.data.reason ?? "This promo code is not valid");
+      return;
+    }
+    // Resolve the applied code's database id via promoLookup so the booking is
+    // linked to the promo code row (usage counting, reports).
+    setAppliedPromo({ codeId: 0, code, discount: promoCheck.data.discount });
+    toast.success(`Promo ${code} applied — ₱${promoCheck.data.discount.toFixed(2)} off`);
+  };
+
+  const removePromo = () => {
+    setAppliedPromo(null);
+    setPromoCode("");
+    setLastCheckValid(null);
+    setLastCheckReason(null);
+  };
+
+  // Resolve the applied promo's id through a dedicated lookup so the backend
+  // can link the booking to the promo code row (for usage counting).
+  const promoLookup = trpc.bookings.promoCodeId.useQuery(
+    { venueId: draft.venueId!, code: appliedPromo?.code ?? "" },
+    { enabled: appliedPromo != null && !appliedPromo.codeId },
+  );
+  useEffect(() => {
+    if (appliedPromo && promoLookup.data?.id) {
+      setAppliedPromo(prev => (prev ? { ...prev, codeId: promoLookup.data.id } : prev));
+    }
+  }, [promoLookup.data?.id, appliedPromo]);
 
   return (
     <div className="container py-10 md:py-14 fade-in">
@@ -179,12 +259,81 @@ export default function Checkout() {
                   <span className="font-medium">{formatPHP(draft.nightAmount ?? 0)}</span>
                 </div>
               )}
+              {/* Promo code */}
+              <div className="pt-2 border-t border-border">
+                <h4 className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                  Promo code
+                </h4>
+                {appliedPromo ? (
+                  <div className="mt-2 flex items-center gap-2 rounded-md border border-primary/40 bg-primary/5 px-3 py-2">
+                    <Tag className="h-3.5 w-3.5 text-primary" />
+                    <span className="flex-1 text-sm font-mono font-semibold">{appliedPromo.code}</span>
+                    <span className="text-xs text-success font-semibold">−{formatPHP(appliedPromo.discount)}</span>
+                    <button
+                      type="button"
+                      aria-label="Remove promo code"
+                      onClick={removePromo}
+                      className="rounded-full p-0.5 text-muted-foreground hover:text-destructive transition-colors duration-150">
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="mt-2 flex gap-2">
+                    <input
+                      className="flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm uppercase outline-none focus:ring-2 focus:ring-primary/40"
+                      placeholder="Enter code, e.g. SUMMERDUNK"
+                      value={promoCode}
+                      onChange={e => setPromoCode(e.target.value)}
+                    />
+                    <Button
+                      size="icon"
+                      className="press shrink-0"
+                      disabled={checkingCode.length > 0 || !promoCheck.data || !promoCheck.data.valid}
+                      onClick={applyPromo}
+                      aria-label="Apply promo code">
+                      {checkingCode.length > 0 || promoCheck.isFetching ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Check className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </div>
+                )}
+                {lastCheckValid === false && lastCheckReason && (
+                  <p className="mt-1.5 flex items-start gap-1 text-[11px] text-destructive">
+                    <X className="mt-px h-3 w-3 shrink-0" /> {lastCheckReason}
+                  </p>
+                )}
+                {lastCheckValid === true && !appliedPromo && (
+                  <p className="mt-1.5 flex items-start gap-1 text-[11px] text-success">
+                    <BadgeCheck className="mt-px h-3 w-3 shrink-0" /> Valid — {formatPHP(lastCheckDiscount)} off. Tap the check to apply.
+                  </p>
+                )}
+              </div>
+              {appliedPromo && (
+                <div className="flex items-center justify-between text-sm">
+                  <span className="flex items-center gap-2 text-muted-foreground">
+                    <Sun className="h-4 w-4 text-transparent" /> Discount
+                  </span>
+                  <span className="font-medium text-success">−{formatPHP(appliedPromo.discount)}</span>
+                </div>
+              )}
               <div className="flex items-center justify-between pt-2 border-t border-border">
                 <Label className="text-base font-semibold">Total</Label>
                 <span className="text-2xl font-bold text-primary">
-                  {formatPHP(draft.total ?? 0)}
+                  {appliedPromo
+                    ? formatPHP(Math.max(0, Number(draft.total ?? 0) - appliedPromo.discount))
+                    : formatPHP(draft.total ?? 0)}
                 </span>
               </div>
+              {appliedPromo && (
+                <div className="flex items-center justify-between pt-1">
+                  <span className="text-xs text-muted-foreground">Before promo</span>
+                  <span className="text-xs text-muted-foreground line-through">
+                    {formatPHP(draft.total ?? 0)}
+                  </span>
+                </div>
+              )}
             </div>
 
             <Badge variant="outline" className="mt-4 w-full justify-center py-1.5">

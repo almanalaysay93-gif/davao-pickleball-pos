@@ -330,3 +330,26 @@
 - [x] Vitest specs for new features: server/feature-batch.test.ts covering replies, staff scoping, waitlist join/notify, reports CSV, memberships, recurring series (10 tests)
 - [x] Full suite green (100/100), typecheck clean, visual QA on desktop + mobile
 - [x] Checkpoint, push to GitHub, deliver
+
+## Promo toolkit (announcements upgrade — 5 features)
+- [ ] `announcements` upgrade: photo_url, expire_at, kind (announcement|event), event_date fields + existing body/title
+- [ ] `promo_codes` table (code, venue_id, discount_pct or flat, expires_at, active) + owner CRUD
+- [ ] Backend: owner.announcements.create/update/delete with S3 image upload (storagePut), expiry filtering; public list scoped
+- [ ] Backend: checkout promo code validation (owner.bookings.createBooking / customer booking) applies discount, records discount on booking row
+- [ ] Owner UI: rich announcement editor (title, body, photo upload, expiry date, event toggle + event date)
+- [ ] Owner UI: promo code manager section (create/list/deactivate codes)
+- [ ] Customer UI: promo gallery on venue detail pages (VenueLocation/Schedule venue header)
+- [ ] Customer UI: event announcements pinned on the Schedule page (day row highlight / event card list)
+- [ ] Customer UI: promo code input at checkout with applied-discount display
+- [ ] Customer UI: share buttons (copy link / WhatsApp / Facebook) for promotions on venue pages
+- [ ] Vitest specs for announcements CRUD scoping + promo code validation
+- [ ] Full suite green, typecheck clean, visual QA
+- [ ] Checkpoint, push to GitHub, deliver
+### Promo toolkit — implementation pass (Aug 18)
+- [ ] Migrations applied: announcements.photo_url/kind/event_date columns + promo_codes table (verify via SQL)
+- [ ] Bookings: add promo_code_id + discount_amount columns; bookings.create accepts promoCodeId and applies/records discount, bumps uses
+- [ ] Owner: uploadPromoImage + promoCodes CRUD + create/updateAnnouncement wired (backend verified)
+- [ ] Owner UI: AnnouncementsSection rich editor (photo upload, kind select, expiry, event date) + rows show kind badge/photo
+- [ ] Owner UI: PromoCodesManager section wired into Owner dashboard + announcements page
+- [ ] Customer: promo cards with photos + event pins on Schedule/venue pages; share buttons (WhatsApp/Facebook/Copy link)
+- [ ] Customer: Checkout promo code input with real-time validation + discounted totals + persisted discount

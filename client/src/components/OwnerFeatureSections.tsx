@@ -36,6 +36,11 @@ import {
   Sparkles,
   Trash2,
   Users,
+  Tag,
+  Percent,
+  TimerOff,
+  ShieldCheck,
+  Ticket,
 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { formatPHP } from "@shared/rates";
@@ -1225,5 +1230,316 @@ export function OwnerNotificationsBell() {
         </Card>
       )}
     </div>
+  );
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+   Promo codes manager (owners only)
+──────────────────────────────────────────────────────────────────────────── */
+
+export function OwnerPromoCodesSection({ venueIds }: { venueIds: number[] }) {
+  const utils = trpc.useUtils();
+  const [open, setOpen] = useState(false);
+  const [venueId, setVenueId] = useState<number>(venueIds[0] ?? 0);
+  const [code, setCode] = useState("");
+  const [mode, setMode] = useState<"pct" | "flat">("pct");
+  const [discountPct, setDiscountPct] = useState("");
+  const [discountFlat, setDiscountFlat] = useState("");
+  const [minAmount, setMinAmount] = useState("");
+  const [maxUses, setMaxUses] = useState("");
+  const [expiresAt, setExpiresAt] = useState("");
+
+  const codes = trpc.owner.promoCodes.useQuery(
+    { venueId: venueIds.length === 1 ? venueIds[0] : undefined },
+    { refetchOnWindowFocus: false },
+  );
+  const visible = (codes.data ?? []).filter(c =>
+    venueIds.length > 1 || Number(c.venueId) === Number(venueId),
+  );
+
+  const create = trpc.owner.createPromoCode.useMutation({
+    onSuccess: () => {
+      toast.success(`Promo code ${code.trim().toUpperCase()} created`);
+      utils.owner.promoCodes.invalidate();
+      setOpen(false);
+      setCode("");
+      setDiscountPct("");
+      setDiscountFlat("");
+      setMinAmount("");
+      setMaxUses("");
+      setExpiresAt("");
+    },
+    onError: e => toast.error(e.message),
+  });
+  const toggle = trpc.owner.updatePromoCode.useMutation({
+    onSuccess: () => void utils.owner.promoCodes.invalidate(),
+    onError: e => toast.error(e.message),
+  });
+  const remove = trpc.owner.deletePromoCode.useMutation({
+    onSuccess: () => {
+      toast.success("Promo code deleted");
+      void utils.owner.promoCodes.invalidate();
+    },
+    onError: e => toast.error(e.message),
+  });
+
+  const venues = trpc.owner.myVenues.useQuery(undefined, {
+    enabled: venueIds.length > 1,
+  }) as unknown as { data?: { id: number; name: string }[] };
+
+  const submit = () => {
+    const c = code.trim().toUpperCase();
+    const discount: Record<string, unknown> =
+      mode === "pct"
+        ? { discountPct: parseFloat(discountPct) }
+        : { discountFlat: parseFloat(discountFlat) };
+    create.mutate({
+      venueId,
+      code: c,
+      ...discount,
+      minAmount: minAmount.trim() ? parseFloat(minAmount) : undefined,
+      maxUses: maxUses.trim() ? parseInt(maxUses, 10) : undefined,
+      expiresAt: expiresAt ? new Date(expiresAt).toISOString() : undefined,
+    });
+  };
+
+  const now = Date.now();
+  const isExpired = (c: { expiresAt: string | null }) =>
+    c.expiresAt ? new Date(c.expiresAt).getTime() < now : false;
+  const isUsedUp = (c: { maxUses: number | null; uses: number }) =>
+    c.maxUses != null && c.uses >= Number(c.maxUses);
+
+  return (
+    <Card className="border-border bg-card">
+      <CardContent className="p-6">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Tag className="h-5 w-5 text-accent" />
+            <div>
+              <h3 className="font-display text-lg font-semibold">Promo codes</h3>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Discount codes players redeem at checkout.
+              </p>
+            </div>
+          </div>
+          <Dialog open={open} onOpenChange={setOpen}>
+            <DialogTrigger asChild>
+              <Button variant="outline" size="sm" className="press bg-transparent text-xs">
+                <Plus className="h-3.5 w-3.5 mr-1" /> New code
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-md">
+              <DialogHeader>
+                <DialogTitle>Create a promo code</DialogTitle>
+                <DialogDescription>
+                  Players enter the code at checkout to get a discount on their booking.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-3">
+                {venueIds.length > 1 && (
+                  <div>
+                    <Label className="mb-1.5 block text-sm font-medium">Venue *</Label>
+                    <Select value={String(venueId)} onValueChange={v => setVenueId(Number(v))}>
+                      <SelectTrigger className="bg-background">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(venues.data ?? []).map((v: { id: number; name: string }) => (
+                          <SelectItem key={v.id} value={String(v.id)}>
+                            {v.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+                <Label className="block">
+                  <span className="mb-1.5 block text-sm font-medium">Code *</span>
+                  <Input
+                    className="bg-background uppercase"
+                    placeholder="SUMMERDUNK"
+                    value={code}
+                    onChange={e =>
+                      setCode(e.target.value.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 32))
+                    }
+                  />
+                  <span className="mt-1 block text-[11px] text-muted-foreground">
+                    Letters, numbers, _ and - only (shown uppercase).
+                  </span>
+                </Label>
+                <div className="flex items-center gap-2">
+                  {(["pct", "flat"] as const).map(m => (
+                    <button
+                      key={m}
+                      type="button"
+                      className={`flex-1 rounded-md border px-2 py-1.5 text-xs font-semibold transition-colors duration-150 press ${
+                        mode === m
+                          ? "border-primary bg-primary/10 text-primary"
+                          : "border-border text-muted-foreground hover:text-foreground"
+                      }`}>
+                      {m === "pct" ? "Percentage" : "Flat ₱"}
+                    </button>
+                  ))}
+                </div>
+                {mode === "pct" ? (
+                  <Label className="block">
+                    <span className="mb-1.5 block text-sm font-medium">Discount % *</span>
+                    <Input
+                      type="number"
+                      min={0}
+                      max={100}
+                      className="bg-background"
+                      placeholder="20"
+                      value={discountPct}
+                      onChange={e => setDiscountPct(e.target.value)}
+                    />
+                  </Label>
+                ) : (
+                  <Label className="block">
+                    <span className="mb-1.5 block text-sm font-medium">Flat discount ₱ *</span>
+                    <Input
+                      type="number"
+                      min={0}
+                      className="bg-background"
+                      placeholder="50"
+                      value={discountFlat}
+                      onChange={e => setDiscountFlat(e.target.value)}
+                    />
+                  </Label>
+                )}
+                <div className="grid grid-cols-2 gap-3">
+                  <Label className="block">
+                    <span className="mb-1.5 block text-sm font-medium">Min booking ₱</span>
+                    <Input
+                      type="number"
+                      min={0}
+                      className="bg-background"
+                      placeholder="0"
+                      value={minAmount}
+                      onChange={e => setMinAmount(e.target.value)}
+                    />
+                    <span className="mt-1 block text-[10px] text-muted-foreground">
+                      Required total before the discount applies.
+                    </span>
+                  </Label>
+                  <Label className="block">
+                    <span className="mb-1.5 block text-sm font-medium">Max uses</span>
+                    <Input
+                      type="number"
+                      min={1}
+                      className="bg-background"
+                      placeholder="Unlimited"
+                      value={maxUses}
+                      onChange={e => setMaxUses(e.target.value)}
+                    />
+                  </Label>
+                </div>
+                <Label className="block">
+                  <span className="mb-1.5 block text-sm font-medium">Expires (optional)</span>
+                  <Input
+                    type="datetime-local"
+                    className="bg-background"
+                    value={expiresAt}
+                    onChange={e => setExpiresAt(e.target.value)}
+                  />
+                </Label>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" className="press bg-transparent" onClick={() => setOpen(false)}>Cancel</Button>
+                <Button
+                  className="press"
+                  disabled={
+                    create.isPending ||
+                    !venueId ||
+                    !code.trim() ||
+                    (mode === "pct" && (isNaN(parseFloat(discountPct)) || parseFloat(discountPct) <= 0)) ||
+                    (mode === "flat" && (isNaN(parseFloat(discountFlat)) || parseFloat(discountFlat) <= 0))
+                  }
+                  onClick={submit}>
+                  {create.isPending ? "Creating…" : "Create code"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </div>
+        <div className="mt-4 space-y-2">
+          {!codes.data ? (
+            <div className="flex justify-center py-4">
+              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+            </div>
+          ) : visible.length === 0 ? (
+            <p className="text-xs text-muted-foreground">
+              No promo codes yet. Create one to give players discounts at checkout.
+            </p>
+          ) : (
+            visible.map(c => {
+              const dead = !c.active || isExpired(c) || isUsedUp(c);
+              return (
+                <div key={c.id} className="flex items-center gap-2.5 rounded-md border border-border bg-muted/30 px-3 py-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="flex flex-wrap items-center gap-1.5 text-xs font-mono font-semibold">
+                      <Ticket className="h-3 w-3 text-accent" />
+                      {c.code}
+                      <Badge variant={dead ? "outline" : "secondary"} className="text-[9px]">
+                        {c.active === 0
+                          ? "Deactivated"
+                          : isExpired(c)
+                            ? "Expired"
+                            : isUsedUp(c)
+                              ? "Used up"
+                              : "Active"}
+                      </Badge>
+                    </p>
+                    <p className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
+                      <span className="flex items-center gap-1">
+                        {c.discountPct != null ? (
+                          <span className="flex items-center gap-0.5">
+                            <Percent className="h-3 w-3" />{Number(c.discountPct)}% off
+                          </span>
+                        ) : (
+                          <span>₱{Number(c.discountFlat ?? 0).toFixed(2)} off</span>
+                        )}
+                      </span>
+                      {c.minAmount != null && Number(c.minAmount) > 0 && (
+                        <span>Min ₱{Number(c.minAmount).toFixed(2)}</span>
+                      )}
+                      {c.maxUses != null && (
+                        <span className="flex items-center gap-0.5">
+                          <ShieldCheck className="h-3 w-3" />{c.uses}/{Number(c.maxUses)} used
+                        </span>
+                      )}
+                      {c.expiresAt && (
+                        <span className="flex items-center gap-0.5">
+                          <TimerOff className="h-3 w-3" />
+                          {new Date(c.expiresAt).toLocaleDateString()}
+                        </span>
+                      )}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 press bg-transparent"
+                      title={c.active === 1 ? "Deactivate code" : "Reactivate code"}
+                      onClick={() => toggle.mutate({ id: c.id, active: c.active === 1 ? 0 : 1 })}>
+                      <Tag className={`h-3.5 w-3.5 ${c.active === 1 ? "text-success" : "text-muted-foreground"}`} />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 press bg-transparent text-destructive"
+                      title="Delete code"
+                      onClick={() => remove.mutate({ id: c.id })}>
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </CardContent>
+    </Card>
   );
 }

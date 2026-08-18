@@ -29,7 +29,41 @@ export interface BookingRow {
 }
 export interface AnnouncementRow {
   id: number; venueId: number; title: string; message: string; active: number;
-  expireAt: string | null; createdAt: unknown; updatedAt: unknown;
+  expireAt: string | null; photoUrl: string | null; kind: string;
+  eventDate: string | null; createdAt: unknown; updatedAt: unknown;
+}
+export interface PromoCodeRow {
+  id: number; venueId: number; code: string; discountPct: string | null;
+  discountFlat: string | null; minAmount: string | null; maxUses: number | null;
+  uses: number; active: number; expiresAt: string | null; createdAt: unknown;
+}
+export async function listPromoCodesByVenueIds(venueIds: number[]): Promise<PromoCodeRow[]> {
+  if (venueIds.length === 0) return [];
+  return q("promoCodes")
+    .in("venue_id", venueIds)
+    .order("created_at", { ascending: false })
+    .limit(200)
+    .exec() as unknown as Promise<PromoCodeRow[]>;
+}
+export async function createPromoCode(input: Record<string, unknown>): Promise<PromoCodeRow | undefined> {
+  const rows = await q("promoCodes").insert(input);
+  return rows[0] as unknown as PromoCodeRow | undefined;
+}
+export async function updatePromoCode(id: number, set: Record<string, unknown>) {
+  await q("promoCodes").eq("id", id).update(set);
+}
+export async function deletePromoCode(id: number) {
+  await q("promoCodes").eq("id", id).del();
+}
+export async function bumpPromoCodeUses(id: number) {
+  // Codes are low-concurrency (single-region app): read-modify-write is safe.
+  const cur = await getPromoCodeById(id);
+  if (!cur) return;
+  await q("promoCodes").eq("id", id).update({ uses: cur.uses + 1 });
+}
+export async function getPromoCodeById(id: number): Promise<PromoCodeRow | undefined> {
+  const rows = await q("promoCodes").eq("id", id).limit(1).exec();
+  return rows[0] as unknown as PromoCodeRow | undefined;
 }
 export interface OwnerCredentialRow {
   id: number; username: string; passwordHash: string; venueId: number | null; createdAt: unknown;

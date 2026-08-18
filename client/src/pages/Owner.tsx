@@ -43,6 +43,7 @@ import { OwnerReviewsFeed } from "@/components/OwnerReviewsFeed";
 import {
   OwnerMembershipsSection,
   OwnerNotificationsBell,
+  OwnerPromoCodesSection,
   OwnerReportsSection,
   OwnerSeriesDialog,
   OwnerStaffSection,
@@ -108,6 +109,7 @@ function OwnerDashboard() {
           playerName: string;
           channel: string;
           totalAmount: string;
+          discountAmount: string | null;
           paymentStatus: string;
         };
         venue: { id: number; name: string; address: string } | null;
@@ -228,6 +230,11 @@ function OwnerDashboard() {
       {/* Slot waitlist */}
       <OwnerWaitlistSection venueIds={venuesList.map(v => v.id)} />
 
+      {/* Promo codes & discounts */}
+      <div className="mt-10">
+        <OwnerPromoCodesSection venueIds={venuesList.map(v => v.id)} />
+      </div>
+
       {/* Bookings across owned venues */}
       <Card className="mt-10 border-border bg-card">
         <CardContent className="p-0">
@@ -291,7 +298,15 @@ function OwnerDashboard() {
                         </Badge>
                       </TableCell>
                       <TableCell className="font-medium">
-                        {formatPHP(Number(booking.totalAmount))}
+                        {Number(booking.discountAmount ?? 0) > 0 ? (
+                          <span className="whitespace-nowrap">
+                            <s className="text-muted-foreground">{formatPHP(Number(booking.totalAmount) + Number(booking.discountAmount))}</s>{" "}
+                            <span className="text-primary">{formatPHP(Number(booking.totalAmount))}</span>{" "}
+                            <span className="text-[10px] text-success font-semibold">PROMO</span>
+                          </span>
+                        ) : (
+                          formatPHP(Number(booking.totalAmount))
+                        )}
                       </TableCell>
                       <TableCell>
                         <StatusBadge status={booking.paymentStatus} />
@@ -644,6 +659,7 @@ type BookingsQuery = {
       playerName: string;
       channel: string;
       totalAmount: string;
+      discountAmount: string | null;
       paymentStatus: string;
     };
     venue: { id: number; name: string; address: string } | null;
@@ -728,7 +744,15 @@ function OwnerBookingsSection({
                         </Badge>
                       </TableCell>
                       <TableCell className="font-medium">
-                        {formatPHP(Number(booking.totalAmount))}
+                        {Number(booking.discountAmount ?? 0) > 0 ? (
+                          <span className="whitespace-nowrap">
+                            <s className="text-muted-foreground">{formatPHP(Number(booking.totalAmount) + Number(booking.discountAmount))}</s>{" "}
+                            <span className="text-primary">{formatPHP(Number(booking.totalAmount))}</span>{" "}
+                            <span className="text-[10px] text-success font-semibold">PROMO</span>
+                          </span>
+                        ) : (
+                          formatPHP(Number(booking.totalAmount))
+                        )}
                       </TableCell>
                       <TableCell>
                         <StatusBadge status={booking.paymentStatus} />
@@ -801,6 +825,10 @@ function AnnouncementsSection({ venueId }: { venueId: number }) {
   const [title, setTitle] = useState("");
   const [message, setMessage] = useState("");
   const [expireAt, setExpireAt] = useState("");
+  const [kind, setKind] = useState<"announcement" | "promotion" | "event">("announcement");
+  const [eventDate, setEventDate] = useState("");
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [photoBase64, setPhotoBase64] = useState<{ base64: string; mimeType: string; fileName: string } | null>(null);
 
   const anns = trpc.owner.announcements.useQuery(
     { venueId },
@@ -816,9 +844,43 @@ function AnnouncementsSection({ venueId }: { venueId: number }) {
       setTitle("");
       setMessage("");
       setExpireAt("");
+      setKind("announcement");
+      setEventDate("");
+      setPhotoPreview(null);
+      setPhotoBase64(null);
     },
     onError: e => toast.error(e.message),
   });
+  const uploadImage = trpc.owner.uploadPromoImage.useMutation({
+    onSuccess: res => {
+      setPhotoBase64(null);
+      setPhotoPreview(res.imageUrl);
+      toast.success("Photo uploaded");
+    },
+    onError: e => toast.error(e.message),
+  });
+  const onPickPhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 8 * 1024 * 1024) {
+      toast.error("Image must be under 8 MB");
+      e.target.value = "";
+      return;
+    }
+    if (!/^image\/(png|jpe?g|webp)$/.test(file.type)) {
+      toast.error("Only PNG, JPG, or WebP images are supported");
+      e.target.value = "";
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const raw = reader.result as string;
+      const base64 = raw.split(",")[1] ?? "";
+      setPhotoBase64({ base64, mimeType: file.type, fileName: file.name });
+      setPhotoPreview(raw);
+    };
+    reader.readAsDataURL(file);
+  };
   const toggle = trpc.owner.updateAnnouncement.useMutation({
     onSuccess: () => {
       utils.owner.announcements.invalidate({ venueId });
@@ -849,12 +911,31 @@ function AnnouncementsSection({ venueId }: { venueId: number }) {
           </DialogTrigger>
           <DialogContent className="max-w-md">
             <DialogHeader>
-              <DialogTitle>Post a venue announcement</DialogTitle>
+              <DialogTitle>Post a promotion or notice</DialogTitle>
               <DialogDescription>
-                Players will see this notice on the venue pages — e.g. court closures for a
-                party or special events.
+                Players will see this on the venue pages. Promotions and events get featured
+                photo cards and event pins on the schedule.
               </DialogDescription>
             </DialogHeader>
+            <div className="flex items-center gap-2">
+              {([
+                ["announcement", "Notice"],
+                ["promotion", "Promotion"],
+                ["event", "Event"],
+              ] as const).map(([k, label]) => (
+                <button
+                  key={k}
+                  type="button"
+                  className={`flex-1 rounded-md border px-2 py-1.5 text-xs font-semibold transition-colors duration-150 press ${
+                    kind === k
+                      ? "border-primary bg-primary/10 text-primary"
+                      : "border-border text-muted-foreground hover:text-foreground"
+                  }`}
+                  onClick={() => setKind(k)}>
+                  {label}
+                </button>
+              ))}
+            </div>
             <div className="space-y-3">
               <Label className="block">
                 <span className="mb-1.5 block text-sm font-medium">Title *</span>
@@ -887,21 +968,85 @@ function AnnouncementsSection({ venueId }: { venueId: number }) {
                   Leave empty to keep the notice visible indefinitely.
                 </span>
               </Label>
+              {kind === "event" && (
+                <Label className="block">
+                  <span className="mb-1.5 block text-sm font-medium">Event date *</span>
+                  <Input
+                    type="date"
+                    className="bg-background"
+                    value={eventDate}
+                    onChange={e => setEventDate(e.target.value)}
+                  />
+                  <span className="mt-1 block text-[11px] text-muted-foreground">
+                    The event gets pinned on the schedule for this date.
+                  </span>
+                </Label>
+              )}
+              <div>
+                <span className="mb-1.5 block text-sm font-medium">Promo photo (optional)</span>
+                <input
+                  ref={undefined as unknown as React.RefObject<HTMLInputElement>}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  onChange={onPickPhoto}
+                  className="block w-full text-xs file:mr-2 file:rounded-md file:border-0 file:bg-primary/10 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-primary file:cursor-pointer"
+                />
+                {photoPreview && (
+                  <div className="relative mt-2">
+                    <img
+                      src={photoPreview}
+                      alt="Promo photo preview"
+                      className="h-28 w-full rounded-md object-cover border border-border"
+                    />
+                    <button
+                      type="button"
+                      aria-label="Remove photo"
+                      onClick={() => {
+                        setPhotoPreview(null);
+                        setPhotoBase64(null);
+                      }}
+                      className="absolute top-1 right-1 rounded-full bg-black/60 p-1 text-white hover:bg-black/80 transition-colors duration-150">
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                )}
+                <span className="mt-1 block text-[11px] text-muted-foreground">
+                  Promotions with photos appear as featured cards for players.
+                </span>
+              </div>
             </div>
             <DialogFooter>
               <Button variant="outline" className="press bg-transparent" onClick={() => setOpen(false)}>Cancel</Button>
               <Button
                 className="press"
-                disabled={create.isPending || !title.trim() || !message.trim()}
-                onClick={() =>
-                  create.mutate({
-                    venueId,
-                    title: title.trim(),
-                    message: message.trim(),
-                    expireAt: expireAt ? new Date(expireAt).toISOString() : null,
-                  })
-                }>
-                {create.isPending ? "Posting…" : "Post announcement"}
+                disabled={
+                  create.isPending ||
+                  uploadImage.isPending ||
+                  !title.trim() ||
+                  !message.trim() ||
+                  (kind === "event" && !eventDate)
+                }
+                onClick={() => {
+                  const finalize = (photoUrl: string | null) =>
+                    create.mutate({
+                      venueId,
+                      title: title.trim(),
+                      message: message.trim(),
+                      expireAt: expireAt ? new Date(expireAt).toISOString() : null,
+                      photoUrl,
+                      kind,
+                      eventDate: kind === "event" ? eventDate : null,
+                    });
+                  if (photoBase64) {
+                    uploadImage.mutate(
+                      { venueId, fileName: photoBase64.fileName, mimeType: photoBase64.mimeType, base64: photoBase64.base64 },
+                      { onSuccess: res => finalize(res.imageUrl), onError: () => finalize(null) },
+                    );
+                  } else {
+                    finalize(null);
+                  }
+                }}>
+                {create.isPending || uploadImage.isPending ? "Posting…" : "Post announcement"}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -912,9 +1057,30 @@ function AnnouncementsSection({ venueId }: { venueId: number }) {
           anns.data.map(a => (
             <div key={a.id} className="rounded-md border border-border bg-muted/30 px-3 py-2">
               <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="truncate text-xs font-semibold">{a.title}</p>
-                  <p className="mt-0.5 line-clamp-2 text-[11px] text-muted-foreground">{a.message}</p>
+                <div className="flex min-w-0 flex-1 items-start gap-2">
+                  {a.photoUrl && (
+                    <img
+                      src={a.photoUrl}
+                      alt={a.title}
+                      className="h-10 w-10 shrink-0 rounded-md object-cover border border-border"
+                    />
+                  )}
+                  <div className="min-w-0">
+                    <p className="flex flex-wrap items-center gap-1 truncate text-xs font-semibold">
+                      <Badge
+                        variant={a.kind === "promotion" ? "secondary" : a.kind === "event" ? "default" : "outline"}
+                        className="text-[9px] capitalize">
+                        {a.kind}
+                      </Badge>
+                      {a.title}
+                    </p>
+                    <p className="mt-0.5 line-clamp-2 text-[11px] text-muted-foreground">{a.message}</p>
+                    {a.eventDate && (
+                      <p className="mt-0.5 flex items-center gap-1 text-[10px] text-accent font-medium">
+                        <CalendarDays className="h-3 w-3" /> Event on {a.eventDate}
+                      </p>
+                    )}
+                  </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
                   <Badge variant={a.active === 1 ? "secondary" : "outline"} className="text-[9px]">
