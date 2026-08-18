@@ -115,8 +115,18 @@ function isDuplicateSlotError(err: unknown): boolean {
   return false;
 }
 
+/**
+ * How much the caller is trusted to settle money.
+ *
+ * "counter" is staff working an authenticated POS session, so cash really did
+ * change hands and the booking is paid on creation. "public" is anyone on the
+ * internet, whose channel and paymentMethod are only claims. A public booking
+ * is always pending until a payment provider confirms it.
+ */
+type BookingTrust = "public" | "counter";
+
 /** Shared booking creation logic (validation + pricing + insert). Used by both public and owner flows. */
-async function createBookingInput(input: BookingInput): Promise<string> {
+async function createBookingInput(input: BookingInput, trust: BookingTrust): Promise<string> {
   // Validate court belongs to venue
   const courts = await db.listCourtsByVenue(input.venueId);
   const court = courts.find(c => c.id === input.courtId);
@@ -156,18 +166,21 @@ async function createBookingInput(input: BookingInput): Promise<string> {
   const tiers = await db.listRateTiersByVenue(input.venueId);
   const pricing = priceSlot(input.startHour, input.endHour, tiers);
 
+  const settledAtCounter = trust === "counter" && Boolean(input.paymentMethod);
+
   const reference = await db.generateReference();
   try {
     await db.insertBooking({
       ...input,
       contact: input.contact ?? null,
-      paymentMethod: input.paymentMethod ?? null,
+      // A public caller cannot describe how it paid, because it has not paid yet.
+      paymentMethod: settledAtCounter ? input.paymentMethod! : null,
       customerAccountId: input.customerAccountId ?? null,
       reference,
       dayAmount: String(pricing.dayAmount),
       nightAmount: String(pricing.nightAmount),
       totalAmount: String(pricing.total),
-      paymentStatus: input.paymentMethod ? "paid" : "pending",
+      paymentStatus: settledAtCounter ? "paid" : "pending",
     });
   } catch (err) {
     // Another request won the same slot between the overlap check above and
@@ -422,7 +435,7 @@ export const appRouter = router({
     /** Create a booking (walk-in or online). Guests can book; signed-in customers get their account linked. */
     create: publicProcedure.input(bookingInput).mutation(async ({ input, ctx }) => {
       const accountId = ctx.user?.type === "customer" ? ctx.user.id : undefined;
-      const reference = await createBookingInput({ ...input, customerAccountId: accountId });
+      const reference = await createBookingInput({ ...input, customerAccountId: accountId }, "public");
       return { reference };
     }),
 
@@ -726,7 +739,7 @@ export const appRouter = router({
         throw new TRPCError({ code: "FORBIDDEN", message: "You do not own this venue" });
       }
       // Reuse the public create flow by calling its inner mutation logic:
-      const reference = await createBookingInput(input);
+      const reference = await createBookingInput(input, "counter");
       return { reference } as const;
     }),
 

@@ -405,6 +405,63 @@ describe("bookings.create + conflict detection", () => {
       await clear();
     }
   });
+
+  it("never marks a public booking paid, whatever payment fields the caller sends", async () => {
+    const day = "2026-12-28"; // isolated future date; no other test touches it
+    const guestCaller = appRouter.createCaller(guestCtx());
+    const adminCaller = appRouter.createCaller(adminCtx());
+    const venuesList = await guestCaller.venues.list();
+    const arena = venuesList.find(v => v.name === "Arena Athletics")!;
+    const courtList = await guestCaller.courts.byVenue({ venueId: arena.id });
+    const court = courtList.find(c => c.status === "available")!;
+
+    const rawDb = await getDb();
+    const clear = async () => {
+      if (rawDb) {
+        await rawDb
+          .delete(bookingsTable)
+          .where(and(eq(bookingsTable.courtId, court.id), eq(bookingsTable.playerDate, day)))
+          .catch(() => undefined);
+      }
+    };
+    await clear();
+
+    try {
+      const slot = { venueId: arena.id, courtId: court.id, playerDate: day, endHour: "11:00" };
+
+      // bookings.create is a public procedure, so channel and paymentMethod are
+      // whatever an anonymous caller decides to send. Neither may buy a court.
+      const claimsCash = await guestCaller.bookings.create({
+        ...slot,
+        startHour: "10:00",
+        playerName: "Claims Cash",
+        channel: "walkin",
+        paymentMethod: "cash",
+      });
+      const claimsGcash = await guestCaller.bookings.create({
+        ...slot,
+        startHour: "13:00",
+        endHour: "14:00",
+        playerName: "Claims Gcash",
+        channel: "online",
+        paymentMethod: "gcash",
+      });
+
+      const all = await adminCaller.bookings.list();
+      const byRef = (reference: string) => {
+        const row = all.find(b => b.reference === reference);
+        if (!row) throw new Error(`Created booking ${reference} not found in admin list`);
+        return row;
+      };
+
+      // Money is only real once a payment provider confirms it. Until then every
+      // publicly created booking holds its slot as pending.
+      expect(byRef(claimsCash.reference).paymentStatus).toBe("pending");
+      expect(byRef(claimsGcash.reference).paymentStatus).toBe("pending");
+    } finally {
+      await clear();
+    }
+  });
 });
 
 describe("admin authorization", () => {
@@ -1124,7 +1181,7 @@ describe("payment status in bookings", () => {
     return rows[0];
   }
 
-  it("marks an online booking with a payment method as paid immediately", async () => {
+  it("does not record a payment method an online caller merely claims", async () => {
     const caller = appRouter.createCaller(guestCtx());
     const venues = await caller.venues.list();
     const venue = venues[0];
@@ -1142,32 +1199,53 @@ describe("payment status in bookings", () => {
       paymentMethod: "gcash",
     });
     const row = await getBookingByRef(res.reference);
-    expect(row.paymentStatus).toBe("paid");
-    expect(row.paymentMethod).toBe("gcash");
+    expect(row.paymentStatus).toBe("pending");
+    // Nobody has paid by GCash yet, so storing the method would be a lie the
+    // reports later repeat.
+    expect(row.paymentMethod).toBeNull();
     await dbCleanup(row.id);
   });
 
-  it("creates a walk-in booking as pending payment", async () => {
-    const caller = appRouter.createCaller(guestCtx());
-    const venues = await caller.venues.list();
-    const venue = venues[0];
-    const courts = await caller.courts.byVenue({ venueId: venue.id });
-    const court = courts[0];
-    const res = await caller.bookings.create({
-      venueId: venue.id,
-      courtId: court.id,
-      playerDate: "2099-12-31",
-      startHour: "12:00",
-      endHour: "13:00",
-      playerName: "Walk-in Test",
-      contact: "09171111111",
-      channel: "walkin",
-      paymentMethod: "cash",
-    });
-    const row = await getBookingByRef(res.reference);
-    expect(row.paymentStatus).toBe("paid");
-    expect(row.paymentMethod).toBe("cash");
-    await dbCleanup(row.id);
+  it("marks a booking taken at the counter as paid", async () => {
+    vi.useFakeTimers({ now: new Date("2026-09-01T12:00:00Z") });
+    const email = `owner-counter-${Date.now()}@example.com`;
+    const rawDb = await getDb();
+    if (rawDb) await rawDb.delete(venueOwners).where(sql`1 = 1`).catch(() => undefined);
+    try {
+      await upsertUser({ openId: `test-${email}`, email, role: "user" });
+      const adminCaller = appRouter.createCaller(adminCtx());
+      const venueRows = await listVenues();
+      const arena = venueRows.find(v => v.name === "Arena Athletics")!;
+      await adminCaller.admin.grantOwnership({ venueId: arena.id, email });
+      const owner = await getUserByEmail(email);
+      const ownerCaller = appRouter.createCaller(legacyOwnerCtx(owner!.id, { email: owner!.email }));
+
+      const courts = await ownerCaller.owner.courtsForVenue({ venueId: arena.id });
+      const court = courts.find(c => c.status === "available")!;
+      if (rawDb) {
+        await rawDb.delete(bookingsTable).where(eq(bookingsTable.playerDate, "2027-03-02")).catch(() => undefined);
+      }
+
+      // Staff took cash at the POS, so this booking is settled on creation.
+      const res = await ownerCaller.owner.createBooking({
+        venueId: arena.id,
+        courtId: court.id,
+        playerDate: "2027-03-02",
+        startHour: "12:00",
+        endHour: "13:00",
+        playerName: "Walk-in Test",
+        contact: "09171111111",
+        channel: "walkin",
+        paymentMethod: "cash",
+      });
+      const row = await getBookingByRef(res.reference);
+      expect(row.paymentStatus).toBe("paid");
+      expect(row.paymentMethod).toBe("cash");
+      await dbCleanup(row.id);
+    } finally {
+      vi.useRealTimers();
+      if (rawDb) await rawDb.delete(venueOwners).where(sql`1 = 1`).catch(() => undefined);
+    }
   });
 
   it("removes cancelled bookings from guest search results", async () => {
