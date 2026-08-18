@@ -306,7 +306,7 @@
 - [x] `staff` table (user_id, venue_id, role: owner|staff); owner.staff/addStaff/removeStaff procedures with owner-only gate
 - [x] db: listVenueStaff enriched with user name/email
 - [x] Owner app UI: Staff management section (add staff by email dialog, list with remove, venue select, one-time password toast)
-- [ ] Owner self-service: allow venue-bound owners to manage their venue's courts/gallery/bookings (existing ownerProcedure gates verified OK)
+- [x] Owner self-service: venue-bound owners can manage their venue's courts/gallery/bookings (ownsVenue gates verified on addCourt/removeCourt, gallery upload, rates, announcements, bookings — 15+ ownerProcedure endpoints all scope via ownsVenue)
 - [x] Staff UX: addStaff auto-creates an owner_credentials row (username = email, random 12-char one-time password returned to the inviter) so new staff can log in immediately
 
 ### Reports + recurring (items 6, 7)
