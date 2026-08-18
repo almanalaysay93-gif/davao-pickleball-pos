@@ -50,6 +50,20 @@
       "when": 1786548513393,
       "tag": "0006_puzzling_killraven",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "5",
+      "when": 1787039924002,
+      "tag": "0007_goofy_rockslide",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "5",
+      "when": 1787040037352,
+      "tag": "0008_worried_spot",
+      "breakpoints": true
     }
   ]
 }

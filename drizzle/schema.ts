@@ -1,4 +1,5 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, decimal } from "drizzle-orm/mysql-core";
+import { sql } from "drizzle-orm";
+import { int, mysqlEnum, mysqlTable, text, timestamp, uniqueIndex, varchar, decimal } from "drizzle-orm/mysql-core";
 
 /**
  * Core user table backing auth flow.
@@ -88,7 +89,22 @@ export const bookings = mysqlTable("bookings", {
   nightAmount: decimal("nightAmount", { precision: 10, scale: 2 }).default("0"),
   totalAmount: decimal("totalAmount", { precision: 10, scale: 2 }).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
+  /**
+   * Slot key for bookings that still hold their court, and NULL for any that
+   * released it. A unique index permits many NULL rows, so cancelled bookings
+   * stay on record without blocking the slot. MySQL has no partial index, so
+   * this column is how the filter is expressed.
+   */
+  activeSlot: varchar("activeSlot", { length: 40 }).generatedAlwaysAs(
+    sql`(case when \`paymentStatus\` in ('pending','paid') then concat(\`courtId\`,'|',\`playerDate\`,'|',\`startHour\`) else null end)`,
+    { mode: "stored" },
+  ),
+}, table => [
+  // The overlap check in findConflictingBooking reads before it writes, so
+  // concurrent requests for the same slot all pass it. The database is the
+  // only place that can settle the race.
+  uniqueIndex("bookings_active_slot_unique").on(table.activeSlot),
+]);
 
 export type Booking = typeof bookings.$inferSelect;
 export type InsertBooking = typeof bookings.$inferInsert;

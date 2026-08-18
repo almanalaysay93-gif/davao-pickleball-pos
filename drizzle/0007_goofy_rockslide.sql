@@ -1,0 +1,1 @@
+ALTER TABLE `bookings` ADD CONSTRAINT `bookings_slot_unique` UNIQUE(`courtId`,`playerDate`,`startHour`);

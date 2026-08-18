@@ -302,6 +302,109 @@ describe("bookings.create + conflict detection", () => {
       vi.useRealTimers();
     }
   });
+
+  it("gives the slot to exactly one player when identical requests arrive at once", async () => {
+    const day = "2026-12-26"; // isolated future date; no other test touches it
+    const caller = appRouter.createCaller(guestCtx());
+    const venuesList = await caller.venues.list();
+    const arena = venuesList.find(v => v.name === "Arena Athletics")!;
+    const courtList = await caller.courts.byVenue({ venueId: arena.id });
+    const court = courtList.find(c => c.status === "available")!;
+
+    const rawDb = await getDb();
+    const clear = async () => {
+      if (rawDb) {
+        await rawDb
+          .delete(bookingsTable)
+          .where(and(eq(bookingsTable.courtId, court.id), eq(bookingsTable.playerDate, day)))
+          .catch(() => undefined);
+      }
+    };
+    await clear();
+
+    try {
+      const attempt = (playerName: string) =>
+        caller.bookings.create({
+          venueId: arena.id,
+          courtId: court.id,
+          playerDate: day,
+          startHour: "10:00",
+          endHour: "11:00",
+          playerName,
+          channel: "online",
+        });
+
+      // All five requests hit the same court, date, and hour with no await
+      // between them, so every one clears the overlap check before any insert
+      // lands. Only one player may end up holding the slot.
+      const results = await Promise.allSettled([
+        attempt("Racer 1"),
+        attempt("Racer 2"),
+        attempt("Racer 3"),
+        attempt("Racer 4"),
+        attempt("Racer 5"),
+      ]);
+
+      const winners = results.filter(r => r.status === "fulfilled");
+      expect(winners).toHaveLength(1);
+
+      // The players who lost the race must be told the slot is taken, not
+      // handed a raw database error.
+      const losers = results.filter(r => r.status === "rejected");
+      for (const loser of losers) {
+        expect((loser as PromiseRejectedResult).reason).toMatchObject({
+          message: expect.stringMatching(/already booked/i),
+        });
+      }
+    } finally {
+      await clear();
+    }
+  });
+
+  it("frees the slot for a new player after the first booking is cancelled", async () => {
+    const day = "2026-12-27"; // isolated future date; no other test touches it
+    const guestCaller = appRouter.createCaller(guestCtx());
+    const adminCaller = appRouter.createCaller(adminCtx());
+    const venuesList = await guestCaller.venues.list();
+    const arena = venuesList.find(v => v.name === "Arena Athletics")!;
+    const courtList = await guestCaller.courts.byVenue({ venueId: arena.id });
+    const court = courtList.find(c => c.status === "available")!;
+
+    const rawDb = await getDb();
+    const clear = async () => {
+      if (rawDb) {
+        await rawDb
+          .delete(bookingsTable)
+          .where(and(eq(bookingsTable.courtId, court.id), eq(bookingsTable.playerDate, day)))
+          .catch(() => undefined);
+      }
+    };
+    await clear();
+
+    try {
+      const slot = {
+        venueId: arena.id,
+        courtId: court.id,
+        playerDate: day,
+        startHour: "09:00",
+        endHour: "10:00",
+        channel: "online" as const,
+      };
+
+      const first = await guestCaller.bookings.create({ ...slot, playerName: "First Player" });
+      const all = await adminCaller.bookings.list();
+      const target = all.find(b => b.reference === first.reference);
+      if (!target) throw new Error("Created booking not found in admin list");
+      await adminCaller.bookings.cancel({ id: target.id });
+
+      // The slot is free again, so a second player must be able to take it.
+      const second = await guestCaller.bookings.create({ ...slot, playerName: "Second Player" });
+      expect(second.reference).toMatch(/^DV-PB-[A-Z0-9]+$/);
+      expect(second.reference).not.toBe(first.reference);
+    } finally {
+      await clear();
+    }
+  });
 });
 
 describe("admin authorization", () => {

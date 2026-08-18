@@ -103,6 +103,18 @@ const bookingInput = z.object({
 
 type BookingInput = z.infer<typeof bookingInput>;
 
+/**
+ * MySQL raises errno 1062 when the bookings_slot_unique index rejects a second
+ * booking for the same court, date, and start hour. Drizzle wraps the driver
+ * error, so walk the cause chain to find it.
+ */
+function isDuplicateSlotError(err: unknown): boolean {
+  for (let e = err as { errno?: number; code?: string; cause?: unknown } | undefined; e; e = e.cause as typeof e) {
+    if (e.errno === 1062 || e.code === "ER_DUP_ENTRY") return true;
+  }
+  return false;
+}
+
 /** Shared booking creation logic (validation + pricing + insert). Used by both public and owner flows. */
 async function createBookingInput(input: BookingInput): Promise<string> {
   // Validate court belongs to venue
@@ -145,17 +157,26 @@ async function createBookingInput(input: BookingInput): Promise<string> {
   const pricing = priceSlot(input.startHour, input.endHour, tiers);
 
   const reference = await db.generateReference();
-  await db.insertBooking({
-    ...input,
-    contact: input.contact ?? null,
-    paymentMethod: input.paymentMethod ?? null,
-    customerAccountId: input.customerAccountId ?? null,
-    reference,
-    dayAmount: String(pricing.dayAmount),
-    nightAmount: String(pricing.nightAmount),
-    totalAmount: String(pricing.total),
-    paymentStatus: input.paymentMethod ? "paid" : "pending",
-  });
+  try {
+    await db.insertBooking({
+      ...input,
+      contact: input.contact ?? null,
+      paymentMethod: input.paymentMethod ?? null,
+      customerAccountId: input.customerAccountId ?? null,
+      reference,
+      dayAmount: String(pricing.dayAmount),
+      nightAmount: String(pricing.nightAmount),
+      totalAmount: String(pricing.total),
+      paymentStatus: input.paymentMethod ? "paid" : "pending",
+    });
+  } catch (err) {
+    // Another request won the same slot between the overlap check above and
+    // this insert. Report it the same way the check would have.
+    if (isDuplicateSlotError(err)) {
+      throw new TRPCError({ code: "CONFLICT", message: "This slot is already booked" });
+    }
+    throw err;
+  }
 
   return reference;
 }
