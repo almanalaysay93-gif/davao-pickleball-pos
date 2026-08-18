@@ -28,9 +28,10 @@ describe("tRPC router resilience", () => {
         return callerProc();
       })
     );
-    expect(results[0]).toEqual([]);
-    expect(Array.isArray(results[1])).toBe(true);
-    expect(Array.isArray(results[2])).toBe(true);
+    // announcements.list may carry live announcements, so assert shape, not emptiness
+    expect(Array.isArray(results[0])).toBe(true);
+    expect(results[1].length).toBeGreaterThanOrEqual(8);
+    expect(results[2].length).toBeGreaterThanOrEqual(1);
     expect(results[3]).toBeUndefined();
   });
 });

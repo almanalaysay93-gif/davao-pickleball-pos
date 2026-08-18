@@ -15,5 +15,8 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["server/**/*.test.ts", "server/**/*.spec.ts"],
+    // Tests share one live database (Supabase); run files sequentially to avoid
+    // cross-file mutation interference.
+    fileParallelism: false,
   },
 });

@@ -185,7 +185,7 @@ async function createBookingInput(input: BookingInput): Promise<string> {
       throw new TRPCError({ code: "BAD_REQUEST", message: `Minimum booking amount is ₱${Number(code.minAmount).toFixed(2)}` });
     }
     if (code.discountPct != null) {
-      discountAmount = Math.round((amount * Number(code.discountPct)) / 100) / 100;
+      discountAmount = Math.round((amount * Number(code.discountPct)) / 100);
     } else if (code.discountFlat != null) {
       discountAmount = Number(code.discountFlat);
     }
@@ -505,7 +505,7 @@ export const appRouter = router({
         }
         let discount = 0;
         if (match.discountPct != null) {
-          discount = Math.round((input.amount * Number(match.discountPct)) / 100) / 100;
+          discount = Math.round((input.amount * Number(match.discountPct)) / 100);
         } else if (match.discountFlat != null) {
           discount = Number(match.discountFlat);
         }
