@@ -20,6 +20,7 @@ export type BookingDraft = {
   endHour: string | null;
   playerName: string | null;
   contact: string | null;
+  playerEmail: string | null;
   dayAmount: number | null;
   nightAmount: number | null;
   total: number | null;
@@ -42,6 +43,7 @@ const initialDraft: BookingDraft = {
   endHour: null,
   playerName: null,
   contact: null,
+  playerEmail: null,
   dayAmount: null,
   nightAmount: null,
   total: null,

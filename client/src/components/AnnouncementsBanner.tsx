@@ -1,6 +1,6 @@
-import { AlertTriangle, CalendarDays, Copy, Facebook, Megaphone, MessageCircle, X } from "lucide-react";
+import { AlertTriangle, CalendarDays, Check, Copy, Facebook, Megaphone, MessageCircle, Users, X } from "lucide-react";
 import { trpc } from "@/lib/trpc";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
 /**
@@ -13,6 +13,14 @@ export function AnnouncementsBanner({ venueId }: { venueId?: number }) {
     venueId ? { venueId } : undefined,
     { refetchInterval: 15000 },
   );
+
+  const [rsvpName, setRsvpName] = useState<string>(() => {
+    try {
+      return window.localStorage.getItem("rsvp-player-name") ?? "";
+    } catch {
+      return "";
+    }
+  });
 
   const [dismissed, setDismissed] = useState<Set<number>>(() => {
     try {
@@ -28,6 +36,20 @@ export function AnnouncementsBanner({ venueId }: { venueId?: number }) {
   const plainNotices = visible.filter(a => !a.photoUrl && a.kind !== "event");
   const photoPromos = visible.filter(a => a.photoUrl && a.kind === "promotion");
   const events = visible.filter(a => a.kind === "event");
+  const eventIds = useMemo(() => events.map(e => e.id), [events]);
+  const { data: rsvpMap, refetch: refetchRsvps } = trpc.events.attendance.useQuery(
+    { announcementIds: eventIds.length > 0 ? eventIds : [0] },
+    { enabled: eventIds.length > 0, refetchInterval: 15000 },
+  );
+  // Keep rsvpMap keys in sync with event ids (avoid invalid queries).
+  const validRsvpMap = rsvpMap ?? ({} as Record<number, never[]>);
+
+  const rsvp = trpc.events.toggleRsvp.useMutation({
+    onSuccess: async () => {
+      await refetchRsvps();
+    },
+  });
+
   if (isLoading || visible.length === 0) return null;
 
   const dismiss = (id: number) => {
@@ -46,6 +68,27 @@ export function AnnouncementsBanner({ venueId }: { venueId?: number }) {
     });
   };
 
+  const doRsvp = async (ann: { id: number; title: string }) => {
+    let name = rsvpName.trim();
+    if (!name) {
+      const entered = window.prompt("What name should we put you down under?");
+      if (!entered || !entered.trim()) return;
+      name = entered.trim();
+      setRsvpName(name);
+      try {
+        window.localStorage.setItem("rsvp-player-name", name);
+      } catch {
+        // ignore
+      }
+    }
+    try {
+      const res = await rsvp.mutateAsync({ announcementId: ann.id, playerName: name });
+      toast(res.joined ? `You're in for "${ann.title}"!` : `You've left "${ann.title}".`);
+    } catch {
+      toast.error("Could not update your RSVP — please try again");
+    }
+  };
+
   return (
     <div className="fade-in space-y-2">
       {/* Photo promo cards (promotions with images) */}
@@ -53,33 +96,54 @@ export function AnnouncementsBanner({ venueId }: { venueId?: number }) {
         <PromoCard key={a.id} a={a} onDismiss={() => dismiss(a.id)} />
       ))}
 
-      {/* Event pins */}
-      {events.map(a => (
-        <div
-          key={a.id}
-          className="flex items-start gap-2.5 rounded-lg border border-accent/50 bg-accent/10 px-4 py-3">
-          <CalendarDays className="mt-0.5 h-4 w-4 shrink-0 text-accent-foreground" />
-          <div className="min-w-0 flex-1">
-            <p className="flex flex-wrap items-center gap-2 text-sm font-semibold">
-              <span className="rounded bg-accent px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-accent-foreground">
-                {a.eventDate}
-              </span>
-              {a.photoUrl && (
-                <img src={a.photoUrl} alt={a.title} className="h-14 w-14 rounded-md object-cover border border-border" />
-              )}
-              <span className="flex-1">{a.title}</span>
-              <button
-                type="button"
-                aria-label="Dismiss event notice"
-                onClick={() => dismiss(a.id)}
-                className="ml-auto rounded-full p-0.5 text-muted-foreground hover:text-foreground hover:bg-accent/20 transition-colors duration-150">
-                <X className="h-3.5 w-3.5" />
-              </button>
-            </p>
-            <p className="mt-0.5 text-xs text-muted-foreground">{a.message}</p>
+      {/* Event pins with RSVP */}
+      {events.map(a => {
+        const attendees = (validRsvpMap[a.id] ?? []) as { playerName?: string | null }[];
+        const amIn = attendees.some(at => String(at.playerName ?? "").toLowerCase() === rsvpName.toLowerCase());
+        return (
+          <div
+            key={a.id}
+            className="flex items-start gap-2.5 rounded-lg border border-accent/50 bg-accent/10 px-4 py-3">
+            <CalendarDays className="mt-0.5 h-4 w-4 shrink-0 text-accent-foreground" />
+            <div className="min-w-0 flex-1">
+              <p className="flex flex-wrap items-center gap-2 text-sm font-semibold">
+                <span className="rounded bg-accent px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-accent-foreground">
+                  {a.eventDate}
+                </span>
+                {a.photoUrl && (
+                  <img src={a.photoUrl} alt={a.title} className="h-14 w-14 rounded-md object-cover border border-border" />
+                )}
+                <span className="flex-1">{a.title}</span>
+                <button
+                  type="button"
+                  aria-label="Dismiss event notice"
+                  onClick={() => dismiss(a.id)}
+                  className="ml-auto rounded-full p-0.5 text-muted-foreground hover:text-foreground hover:bg-accent/20 transition-colors duration-150">
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </p>
+              <p className="mt-0.5 text-xs text-muted-foreground">{a.message}</p>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center gap-1 rounded-full border border-accent/40 bg-card px-2 py-0.5 text-[11px] font-medium text-foreground">
+                  <Users className="h-3 w-3" />
+                  {attendees.length} coming
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void doRsvp(a)}
+                  className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold transition-all duration-150 active:scale-95 ${
+                    amIn
+                      ? "bg-accent-foreground text-accent"
+                      : "bg-accent text-accent-foreground hover:opacity-90"
+                  }`}>
+                  {amIn ? <Check className="h-3 w-3" /> : null}
+                  {amIn ? "You're coming" : "I'm coming"}
+                </button>
+              </div>
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
 
       {/* Plain notices */}
       {plainNotices.map(a => (

@@ -7,7 +7,7 @@
  */
 import type { InsertUser } from "../drizzle/schema";
 import { ENV } from "./_core/env";
-import { deleteWhere, q } from "./supa";
+import { deleteWhere, q, type Row } from "./supa";
 
 export interface VenueRow {
   id: number; name: string; address: string; district: string | null;
@@ -25,7 +25,7 @@ export interface BookingRow {
   id: number; reference: string; courtId: number; venueId: number; playerDate: string;
   startHour: string; endHour: string; playerName: string; contact: string;
   customerAccountId: number | null; channel: string; paymentStatus: string; paymentMethod: string | null;
-  dayAmount: string | number; nightAmount: string | number; totalAmount: string | number; createdAt: unknown;
+  dayAmount: string | number; nightAmount: string | number; totalAmount: string | number; promoCodeId: number | null; discountAmount: string | number; playerEmail: string | null; createdAt: unknown;
 }
 export interface AnnouncementRow {
   id: number; venueId: number; title: string; message: string; active: number;
@@ -886,4 +886,73 @@ export async function listUnreadBookings(venueIds: number[], limit = 20): Promis
     venueName: byVenue.get(b.venueId) ?? `Venue #${b.venueId}`,
     courtNumber: byCourt.get(b.courtId) ?? null,
   }));
+}
+
+// ---------------------------------------------------------------------------
+// Event attendance (RSVP)
+// ---------------------------------------------------------------------------
+
+export async function toggleAttendance(input: {
+  announcementId: number;
+  playerName: string;
+  contact?: string | null;
+}): Promise<{ joined: boolean; count: number }> {
+  const existing = (await q("eventAttendance")
+    .eq("player_name", input.playerName)
+    .eq("announcement_id", input.announcementId)
+    .limit(1)
+    .exec()) as unknown as Row[];
+  if (existing.length > 0) {
+    await q("eventAttendance")
+      .eq("player_name", input.playerName)
+      .eq("announcement_id", input.announcementId)
+      .del();
+    const count = await attendanceCount(input.announcementId);
+    return { joined: false, count };
+  }
+  await q("eventAttendance").insert({
+    announcementId: input.announcementId,
+    playerName: input.playerName,
+    contact: input.contact ?? null,
+  });
+  const count = await attendanceCount(input.announcementId);
+  return { joined: true, count };
+}
+
+async function attendanceCount(announcementId: number): Promise<number> {
+  const rows = await q("eventAttendance")
+    .eq("announcement_id", announcementId)
+    .exec();
+  return rows.length;
+}
+
+export async function listAttendanceByAnnouncementIds(ids: number[]): Promise<Record<number, Row[]>> {
+  if (ids.length === 0) return {};
+  const rows = await q("eventAttendance")
+    .in("announcement_id", ids)
+    .order("id", { ascending: false })
+    .exec();
+  const byAnn: Record<number, Row[]> = {};
+  for (const r of rows) {
+    const key = Number(r.announcementId ?? 0);
+    (byAnn[key] ??= []).push(r);
+  }
+  return byAnn;
+}
+
+export async function getAnnouncementById(id: number): Promise<AnnouncementRow | undefined> {
+  const rows = await q("announcements").eq("id", id).limit(1).exec();
+  return rows[0] as unknown as AnnouncementRow | undefined;
+}
+
+export async function deleteAttendanceByPlayerNamePrefix(prefix: string) {
+  await deleteWhere("eventAttendance", [q => q.ilike("player_name", `${prefix}%`)]);
+}
+
+export async function deleteBookingsByPlayerNamePrefix(prefix: string) {
+  await deleteWhere("bookings", [q => q.ilike("player_name", `${prefix}%`)]);
+}
+
+export async function deleteAnnouncementsById(id: number) {
+  await deleteWhere("announcements", [q => q.eq("id", id)]);
 }

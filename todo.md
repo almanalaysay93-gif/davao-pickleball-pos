@@ -353,3 +353,15 @@
 - [x] Owner UI: PromoCodesManager section wired into Owner dashboard + announcements page
 - [x] Customer: promo cards with photos + event pins on Schedule/venue pages; share buttons (WhatsApp/Facebook/Copy link)
 - [x] Customer: Checkout promo code input with real-time validation + discounted totals + persisted discount
+
+## Confirmation email/SMS + Event RSVP (Aug 19)
+- [x] Review notification/email capability (webdev-owner-notifications + dataApi SMS/email options); pick delivery channel
+- [x] Schema: event_attendance table (announcement_id, player_name, contact, created_at) + db helpers (join/toggle, list with count per event)
+- [x] Backend: booking confirmation email via Resend with promo discount line (triggered on successful checkout; graceful if no email)
+- [x] tRPC: event RSVP publicProcedures (join/leave, count) scoped to venue announcements
+- [x] Customer UI: "I'm coming" RSVP button on event cards (AnnouncementsBanner/AnnouncementsList) with live count + toggle
+- [x] Owner UI: RSVP counts shown on event announcement rows + attendee list in details
+- [x] Confirmation receipt page shows discount line (check existing) + email/SMS sent indicator
+- [x] Vitest specs: RSVP join/toggle/count + confirmation email dispatch + token validation
+- [x] Full suite green (134/134), typecheck clean, visual QA desktop + mobile
+- [x] Checkpoint, push to GitHub, deliver

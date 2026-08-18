@@ -1,14 +1,15 @@
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { formatHour, formatPHP } from "@shared/rates";
-import { BadgeCheck, CalendarDays, CircleDollarSign, Clock, MapPin, Printer } from "lucide-react";
+import { BadgeCheck, CalendarDays, CircleDollarSign, Clock, Copy, Facebook, MapPin, MessageCircle, Printer, Tag } from "lucide-react";
 import { Link, useRoute } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { usePageMeta } from "@/lib/meta";
 import { useBooking } from "@/contexts/BookingContext";
 import { VenueLocationMap, VenueGalleryHero } from "@/components/VenueLocation";
 import { ReviewForm, VenueReviews } from "@/components/ReviewForm";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { toast } from "sonner";
 
 export default function Confirmation() {
   const [, params] = useRoute("/confirmation/:reference");
@@ -41,6 +42,7 @@ export default function Confirmation() {
       </div>
     );
   }
+
 
   return (
     <div className="container py-12 md:py-16 fade-in">
@@ -124,10 +126,18 @@ export default function Confirmation() {
                     {data.booking.channel === "walkin" ? "Walk-in" : "Online"}
                   </p>
                 )}
+                {Number(data.booking.discountAmount ?? 0) > 0 && (
+                  <div className="flex justify-between text-success font-medium pt-1">
+                    <span className="inline-flex items-center gap-1">
+                      <Tag className="h-3.5 w-3.5" /> Promo discount
+                    </span>
+                    <span>−{formatPHP(Number(data.booking.discountAmount))}</span>
+                  </div>
+                )}
               </div>
             </div>
 
-            <div className="px-6 pb-6 flex gap-2">
+            <div className="px-6 pb-4 flex gap-2">
               <Button
                 variant="outline"
                 className="press flex-1 bg-transparent"
@@ -138,6 +148,11 @@ export default function Confirmation() {
                 <Button className="w-full press">Done</Button>
               </Link>
             </div>
+            {(Number(data.booking.discountAmount ?? 0) > 0) && (
+              <div className="px-6 pb-6">
+                <ShareButtons booking={data.booking} reference={reference} />
+              </div>
+            )}
             {data.venue && (
               <div className="px-6 pb-6">
                 <VenueLocationMap venue={data.venue} />
@@ -155,6 +170,60 @@ export default function Confirmation() {
             </div>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+function ShareButtons({ booking, reference }: { booking: { venueName?: string | null; playerDate?: string | null; startHour?: string | null; endHour?: string | null; totalAmount?: string | number; discountAmount?: string | number; paymentStatus?: string | null }; reference: string }) {
+  const url = typeof window !== "undefined" ? window.location.href : "";
+  const discount = Number(booking.discountAmount ?? 0);
+  const text = [
+    "Davao Pickleball POS — Booking confirmed",
+    `Reference: ${reference}`,
+    `Venue: ${booking.venueName ?? "—"}`,
+    booking.playerDate ? `Date: ${booking.playerDate}` : null,
+    booking.startHour && booking.endHour
+      ? `Time: ${formatHour(booking.startHour)} – ${formatHour(booking.endHour)}`
+      : null,
+    discount > 0 ? `Promo discount: −${formatPHP(discount)}` : null,
+    `Total: ${formatPHP(Number(booking.totalAmount ?? 0))}`,
+    `Status: ${booking.paymentStatus === "paid" ? "Paid" : "Payment pending"}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const copyLink = async () => {
+    await navigator.clipboard.writeText(`${text}\n${url}`);
+    toast.success("Receipt link copied — paste it anywhere to share");
+  };
+  return (
+    <div className="border-t border-dashed border-border pt-4">
+      <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+        Share your receipt
+      </p>
+      <div className="flex gap-1.5">
+        <a
+          href={`https://wa.me/?text=${encodeURIComponent(`${text} ${url}`)}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Share on WhatsApp"
+          className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-xs font-medium text-[#25D366] hover:bg-muted transition-colors duration-150">
+          <MessageCircle className="h-3.5 w-3.5" /> WhatsApp
+        </a>
+        <a
+          href={`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Share on Facebook"
+          className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-xs font-medium text-[#1877F2] hover:bg-muted transition-colors duration-150">
+          <Facebook className="h-3.5 w-3.5" /> Facebook
+        </a>
+        <button
+          type="button"
+          onClick={copyLink}
+          className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors duration-150">
+          <Copy className="h-3.5 w-3.5" /> Copy link
+        </button>
       </div>
     </div>
   );

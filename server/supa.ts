@@ -15,7 +15,7 @@ export const supa = createClient(SUPA_URL, SUPA_KEY, {
   db: { schema: "public" },
 });
 
-type Row = Record<string, unknown>;
+export type Row = Record<string, unknown>;
 
 /** Map logical camelCase table names to the actual snake_case Postgres table names. */
 const TABLE_ALIASES: Record<string, string> = {
@@ -25,7 +25,7 @@ const TABLE_ALIASES: Record<string, string> = {
   venueOwners: "venue_owners", users: "users", reviews: "reviews",
   reviewReplies: "review_replies", staff: "staff", memberships: "memberships",
   memberAccounts: "member_accounts", waitlist: "waitlist",
-  promoCodes: "promo_codes",
+  promoCodes: "promo_codes", eventAttendance: "event_attendance",
 };
 
 /** Map snake_case Postgres rows to the camelCase field names the routers expect. */
@@ -53,6 +53,7 @@ const MAPS: Record<string, (row: Row) => Row> = {
     channel: row.channel, paymentStatus: row.payment_status, paymentMethod: row.payment_method,
     dayAmount: row.day_amount, nightAmount: row.night_amount, totalAmount: row.total_amount,
     promoCodeId: row.promo_code_id ?? null, discountAmount: String(row.discount_amount ?? 0),
+    playerEmail: row.player_email ?? null,
     createdAt: row.created_at,
   }),
   announcements: row => ({
@@ -126,6 +127,10 @@ const MAPS: Record<string, (row: Row) => Row> = {
     notified: row.notified === true || row.notified === "t", notifiedAt: row.notified_at ?? null,
     createdAt: row.created_at,
   }),
+  eventAttendance: row => ({
+    id: Number(row.id ?? 0), announcementId: Number(row.announcement_id ?? 0),
+    playerName: row.player_name, contact: row.contact ?? null,
+  }),
 };
 
 /** Reverse map: camelCase input → snake_case Postgres columns. */
@@ -138,7 +143,7 @@ const REVERSE: Record<string, Record<string, string>> = {
   courts: { venueId: "venue_id", courtNumber: "court_number", status: "status" },
   rateTiers: { venueId: "venue_id", tierName: "tier_name", startHour: "start_hour", endHour: "end_hour", pricePerHour: "price_per_hour" },
   bookings: {
-    reference: "reference", courtId: "court_id", venueId: "venue_id", playerDate: "player_date",
+    reference: "reference", courtId: "court_id", venueId: "venue_id", playerDate: "player_date", playerEmail: "player_email",
     startHour: "start_hour", endHour: "end_hour", playerName: "player_name", contact: "contact",
     customerAccountId: "customer_account_id",     channel: "channel", paymentStatus: "payment_status", paymentMethod: "payment_method", dayAmount: "day_amount", nightAmount: "night_amount",
     totalAmount: "total_amount", promoCodeId: "promo_code_id", discountAmount: "discount_amount", seriesId: "series_id", membershipId: "membership_id", seenByOwner: "seen_by_owner",
@@ -156,6 +161,7 @@ const REVERSE: Record<string, Record<string, string>> = {
   memberships: { venueId: "venue_id", name: "name", description: "description", price: "price", credits: "credits", validityDays: "validity_days", active: "active" },
   memberAccounts: { customerAccountId: "customer_account_id", phone: "phone", name: "name", membershipId: "membership_id", creditsRemaining: "credits_remaining", expiresAt: "expires_at" },
   waitlist: { venueId: "venue_id", courtId: "court_id", playerDate: "player_date", startHour: "start_hour", endHour: "end_hour", playerName: "player_name", contact: "contact", notified: "notified", notifiedAt: "notified_at" },
+  eventAttendance: { announcementId: "announcement_id", playerName: "player_name", contact: "contact" },
 };
 
 function toSnake(table: string, input: Row): Row {

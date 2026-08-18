@@ -70,6 +70,7 @@ export default function Checkout() {
       endHour: draft.endHour!,
       playerName: draft.playerName!,
       contact: draft.contact ?? undefined,
+      playerEmail: draft.playerEmail ?? undefined,
       channel,
       paymentMethod,
       promoCodeId: appliedPromo?.codeId ?? null,
@@ -127,7 +128,9 @@ export default function Checkout() {
     // Resolve the applied code's database id via promoLookup so the booking is
     // linked to the promo code row (usage counting, reports).
     setAppliedPromo({ codeId: 0, code, discount: promoCheck.data.discount });
-    toast.success(`Promo ${code} applied — ₱${promoCheck.data.discount.toFixed(2)} off`);
+    toast.success(
+      `Promo ${code} applied — ₱${promoCheck.data.discount.toFixed(2)} off${draft.playerEmail ? ". Receipt email will be sent." : ""}`,
+    );
   };
 
   const removePromo = () => {
@@ -237,6 +240,7 @@ export default function Checkout() {
                 }
               />
               <Row k="Player" v={draft.playerName ?? "—"} />
+              {draft.playerEmail && <Row k="Email receipt" v={draft.playerEmail} />}
             </dl>
 
             <div className="mt-5 pt-4 border-t border-border space-y-2.5">

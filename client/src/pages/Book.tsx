@@ -41,6 +41,7 @@ export default function Book() {
   const [duration, setDuration] = useState(1); // hours
   const [playerName, setPlayerName] = useState(draft.playerName ?? "");
   const [contact, setContact] = useState(draft.contact ?? "");
+  const [playerEmail, setPlayerEmail] = useState(draft.playerEmail ?? "");
 
   const bookVenue = venues?.find(v => v.id === venueId);
   usePageMeta({
@@ -143,6 +144,7 @@ export default function Book() {
       endHour,
       playerName: playerName.trim(),
       contact: contact.trim() || null,
+      playerEmail: playerEmail.trim() || null,
       dayAmount: quote.data?.dayAmount ?? 0,
       nightAmount: quote.data?.nightAmount ?? 0,
       total: quote.data?.total ?? 0,
@@ -222,6 +224,17 @@ export default function Book() {
                   value={contact}
                   onChange={e => setContact(e.target.value)}
                   maxLength={64}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Email <span className="text-muted-foreground font-normal">(for confirmation receipt)</span></Label>
+                <Input
+                  type="email"
+                  className="bg-background"
+                  placeholder="juan@example.com"
+                  value={playerEmail}
+                  onChange={e => setPlayerEmail(e.target.value)}
+                  maxLength={128}
                 />
               </div>
               <div className="space-y-1.5">

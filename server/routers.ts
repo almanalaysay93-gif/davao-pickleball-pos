@@ -5,6 +5,7 @@ import { publicProcedure, router } from "./_core/trpc";
 import * as db from "./db";
 import { priceSlot, generateSlots } from "@shared/rates";
 import { storageGet, storagePut } from "./storage";
+import { sendBookingConfirmation } from "./resend";
 
 /** One-time alphanumeric password generated when a staff member is added. */
 function randomOneTimePassword(): string {
@@ -115,6 +116,7 @@ const bookingInput = z.object({
   paymentMethod: z.string().max(32).optional(),
   customerAccountId: z.number().int().positive().optional(),
   promoCodeId: z.number().int().positive().nullable().optional(),
+  playerEmail: z.string().email().optional(),
 });
 
 type BookingInput = z.infer<typeof bookingInput>;
@@ -198,6 +200,7 @@ async function createBookingInput(input: BookingInput): Promise<string> {
   await db.insertBooking({
     ...input,
     contact: input.contact ?? null,
+    playerEmail: input.playerEmail ?? null,
     paymentMethod: input.paymentMethod ?? null,
     customerAccountId: input.customerAccountId ?? null,
     promoCodeId,
@@ -208,6 +211,29 @@ async function createBookingInput(input: BookingInput): Promise<string> {
     totalAmount: String(finalTotal),
     paymentStatus: input.paymentMethod ? "paid" : "pending",
   });
+
+  // Best-effort confirmation email with the promo discount line. Never blocks.
+  const emailTarget = input.playerEmail
+    ? { to: input.playerEmail }
+    : input.customerAccountId
+      ? { to: (await db.getCustomerAccountById(input.customerAccountId))?.email ?? "" }
+      : { to: "" };
+  if (emailTarget.to) {
+    const venueName = await db.getVenueById(input.venueId).then(v => v?.name ?? `Venue #${input.venueId}`);
+    const courtNum = court.courtNumber ?? String(input.courtId);
+    sendBookingConfirmation({
+      playerName: input.playerName,
+      to: emailTarget.to,
+      reference,
+      venueName,
+      courtLabel: courtNum,
+      playerDate: input.playerDate,
+      startHour: input.startHour,
+      endHour: input.endHour,
+      totalAmount: finalTotal,
+      discountAmount,
+    });
+  }
   return reference;
 }
 
@@ -1143,8 +1169,25 @@ export const appRouter = router({
       )
       .query(async ({ input, ctx }) => {
         const ids = await ownedVenueIds(ctx, input?.venueId);
-        const rows = await db.listVenueAnnouncements(ids);
-        return rows.filter(a => ownsVenue(ctx, a.venueId));
+        const rows = (await db.listVenueAnnouncements(ids)).filter(a => ownsVenue(ctx, a.venueId));
+        // Attach RSVP headcount + latest attendee names to every announcement.
+        const byAnn = await db.listAttendanceByAnnouncementIds(rows.map(r => r.id));
+        return rows.map(a => ({
+          ...a,
+          rsvpCount: (byAnn[a.id] ?? []).length,
+          recentAttendees: (byAnn[a.id] ?? []).slice(0, 3).map(r => String(r.playerName ?? "")),
+          attendees: byAnn[a.id] ?? [],
+        }));
+      }),
+    /** Owner: full attendee list for an event at an owned venue. */
+    announcementAttendees: ownerProcedure
+      .input(z.object({ announcementId: z.number().int().positive() }))
+      .query(async ({ input, ctx }) => {
+        const ann = await db.getAnnouncementById(input.announcementId);
+        if (!ann || !ownsVenue(ctx, ann.venueId)) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Announcement not found at your venue" });
+        }
+        return (await db.listAttendanceByAnnouncementIds([ann.id]))[ann.id] ?? [];
       }),
 
     createAnnouncement: ownerProcedure
@@ -1381,12 +1424,38 @@ export const appRouter = router({
           .object({ venueId: z.number().int().positive().optional() })
           .optional(),
       )
-      .query(async ({ input }) => {
+            .query(async ({ input }) => {
         const ids = input?.venueId ? [input.venueId] : undefined;
         return db.listActiveAnnouncements(ids);
       }),
   }),
-
+  events: router({
+    /** Public: RSVP to an event announcement (or cancel). Idempotent by player name. */
+    toggleRsvp: publicProcedure
+      .input(
+        z.object({
+          announcementId: z.number().int().positive(),
+          playerName: z.string().min(1).max(128).trim(),
+          contact: z.string().max(64).optional(),
+        }),
+      )
+      .mutation(async ({ input }) => {
+        const ann = await db.getAnnouncementById(input.announcementId);
+        if (!ann || ann.kind !== "event" || !ann.active) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "This event is no longer active" });
+        }
+        const result = await db.toggleAttendance({
+          announcementId: input.announcementId,
+          playerName: input.playerName,
+          contact: input.contact ?? null,
+        });
+        return { joined: result.joined, count: result.count } as const;
+      }),
+    /** Public: RSVP counts (+ attendee list) for given announcements. */
+    attendance: publicProcedure
+      .input(z.object({ announcementIds: z.array(z.number().int().positive()) }))
+      .query(async ({ input }) => db.listAttendanceByAnnouncementIds(input.announcementIds)),
+  }),
   reviews: router({
     /** Public: reviews for a venue, or all reviews when no venue given. */
     list: publicProcedure

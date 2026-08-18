@@ -822,6 +822,11 @@ function OwnerAnnouncementsSection({
 function AnnouncementsSection({ venueId }: { venueId: number }) {
   const utils = trpc.useUtils();
   const [open, setOpen] = useState(false);
+  const [attendeesFor, setAttendeesFor] = useState<number | null>(null);
+  const attendeesOpen = trpc.owner.announcementAttendees.useQuery(
+    { announcementId: attendeesFor ?? 1 },
+    { enabled: attendeesFor !== null },
+  );
   const [title, setTitle] = useState("");
   const [message, setMessage] = useState("");
   const [expireAt, setExpireAt] = useState("");
@@ -1080,6 +1085,15 @@ function AnnouncementsSection({ venueId }: { venueId: number }) {
                         <CalendarDays className="h-3 w-3" /> Event on {a.eventDate}
                       </p>
                     )}
+                    {a.kind === "event" && (
+                      <button
+                        type="button"
+                        className="mt-1 inline-flex items-center gap-1 rounded-full border border-accent/40 bg-background px-2 py-0.5 text-[10px] font-medium text-foreground hover:bg-accent/10 transition-colors duration-150"
+                        onClick={() => setAttendeesFor(a.id)}>
+                        <UserPlus className="h-3 w-3 text-accent" />
+                        {a.rsvpCount ?? 0} coming
+                      </button>
+                    )}
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
@@ -1115,6 +1129,27 @@ function AnnouncementsSection({ venueId }: { venueId: number }) {
         )}
         {anns.isLoading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
       </div>
+      <Dialog open={attendeesFor !== null} onOpenChange={o => { if (!o) setAttendeesFor(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="text-sm">Event attendees</DialogTitle>
+          </DialogHeader>
+          <div className="max-h-72 space-y-1.5 overflow-y-auto">
+            {attendeesOpen.data?.length ? (
+              attendeesOpen.data.map((r, i) => (
+                <div key={i} className="flex items-center justify-between rounded-md border border-border bg-muted/40 px-3 py-2 text-xs">
+                  <span className="font-medium">{String(r.playerName ?? "")}</span>
+                  <span className="text-muted-foreground">{r.contact ? String(r.contact) : "—"}</span>
+                </div>
+              ))
+            ) : (
+              <p className="py-4 text-center text-xs text-muted-foreground">
+                {attendeesOpen.isLoading ? "Loading…" : "No one has tapped “I'm coming” yet."}
+              </p>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
