@@ -6,6 +6,7 @@ import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
 import { registerStorageProxy } from "./storageProxy";
+import { registerPaymongoWebhook } from "../webhooks";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
@@ -32,6 +33,12 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 async function startServer() {
   const app = express();
   const server = createServer(app);
+  // Before the JSON parser, and it has to stay there. PayMongo signs the raw
+  // bytes of its webhook body, so the route reads them with its own
+  // express.raw. A parser that reaches the body first leaves an object behind,
+  // and re-serialising that object does not reliably reproduce the bytes the
+  // signature covers: every legitimate delivery would fail verification.
+  registerPaymongoWebhook(app);
   // Configure body parser with larger size limit for file uploads
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));

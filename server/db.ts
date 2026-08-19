@@ -216,6 +216,27 @@ export async function getBookingByReference(reference: string) {
   return rows[0];
 }
 
+/**
+ * Find the booking a PayMongo checkout session belongs to.
+ *
+ * The webhook arrives knowing a session id and nothing else, and the id was
+ * written here when the checkout was opened. Looking the booking up this way
+ * means the handler never has to trust anything carried in the event body.
+ *
+ * One row is expected. A booking holds a single session id at a time, and
+ * opening a new checkout overwrites the old one rather than adding to it.
+ */
+export async function getBookingByPaymongoSessionId(sessionId: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const rows = await db
+    .select()
+    .from(bookings)
+    .where(eq(bookings.paymongoSessionId, sessionId))
+    .limit(1);
+  return rows[0];
+}
+
 export async function getBookingById(id: number, executor?: Executor) {
   const db = executor ?? (await getDb());
   if (!db) throw new Error("Database not available");

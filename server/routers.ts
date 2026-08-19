@@ -10,6 +10,7 @@ import {
   createCheckoutSession,
   retrieveCheckoutSession,
 } from "./paymongo";
+import { isDuplicateSlotError, settleBookingPaid } from "./settlement";
 
 import {
   clearAuthCookies,
@@ -108,18 +109,6 @@ const bookingInput = z.object({
 type BookingInput = z.infer<typeof bookingInput>;
 
 /**
- * MySQL raises errno 1062 when the bookings_slot_unique index rejects a second
- * booking for the same court, date, and start hour. Drizzle wraps the driver
- * error, so walk the cause chain to find it.
- */
-function isDuplicateSlotError(err: unknown): boolean {
-  for (let e = err as { errno?: number; code?: string; cause?: unknown } | undefined; e; e = e.cause as typeof e) {
-    if (e.errno === 1062 || e.code === "ER_DUP_ENTRY") return true;
-  }
-  return false;
-}
-
-/**
  * How much the caller is trusted to settle money.
  *
  * "counter" is staff working an authenticated POS session, so cash really did
@@ -160,35 +149,6 @@ async function attachVenues<T extends { venueId: number }>(rows: T[]) {
  * A check made outside the lock describes a court that was free, not one that
  * still is.
  */
-async function settleBookingPaid(id: number, paymentMethod: string) {
-  const preview = await db.getBookingById(id);
-  if (!preview) throw new TRPCError({ code: "NOT_FOUND", message: "Booking not found" });
-
-  await db.withCourtLock(preview.courtId, async tx => {
-    const booking = await db.getBookingById(id, tx);
-    if (!booking) throw new TRPCError({ code: "NOT_FOUND", message: "Booking not found" });
-    if (booking.paymentStatus === "cancelled" || booking.paymentStatus === "expired") {
-      throw new TRPCError({
-        code: "CONFLICT",
-        message: `This booking is ${booking.paymentStatus} and has released its court. Create a new booking instead.`,
-      });
-    }
-    try {
-      await db.updateBookingStatus(id, { paymentStatus: "paid", paymentMethod }, tx);
-    } catch (err) {
-      // The re-read above rules out the statuses that rebuild a slot key, so a
-      // duplicate here is something neither check foresaw. It still must not
-      // reach the venue as a statement and its parameters.
-      if (isDuplicateSlotError(err)) {
-        throw new TRPCError({
-          code: "CONFLICT",
-          message: "Another booking already holds this slot. Create a new booking instead.",
-        });
-      }
-      throw err;
-    }
-  });
-}
 
 /**
  * Where PayMongo should send the player back to.
