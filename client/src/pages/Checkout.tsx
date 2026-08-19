@@ -128,6 +128,16 @@ export default function Checkout() {
               <Button className="press mt-5 w-full" onClick={payNow} disabled={submitting}>
                 {submitting ? "Opening secure payment…" : "Pay now"}
               </Button>
+              {/* Somebody else can take this slot between picking it and paying
+                  for it, and the refusal lands here. Without a way back, the
+                  only action on the page is the button that just failed and
+                  will fail again for the same reason. */}
+              <button
+                type="button"
+                onClick={() => navigate("/book")}
+                className="mt-3 w-full text-center text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground">
+                Choose a different time
+              </button>
             </CardContent>
           </Card>
         </div>
