@@ -125,6 +125,12 @@ function isDuplicateSlotError(err: unknown): boolean {
  */
 type BookingTrust = "public" | "counter";
 
+/**
+ * How long an unpaid booking may hold its court. Without a deadline a player
+ * who never pays keeps the slot off the market forever.
+ */
+const PENDING_HOLD_MS = 20 * 60 * 1000;
+
 /** Shared booking creation logic (validation + pricing + insert). Used by both public and owner flows. */
 async function createBookingInput(input: BookingInput, trust: BookingTrust): Promise<string> {
   // Validate court belongs to venue
@@ -181,6 +187,7 @@ async function createBookingInput(input: BookingInput, trust: BookingTrust): Pro
       nightAmount: String(pricing.nightAmount),
       totalAmount: String(pricing.total),
       paymentStatus: settledAtCounter ? "paid" : "pending",
+      expiresAt: settledAtCounter ? null : new Date(Date.now() + PENDING_HOLD_MS),
     });
   } catch (err) {
     // Another request won the same slot between the overlap check above and

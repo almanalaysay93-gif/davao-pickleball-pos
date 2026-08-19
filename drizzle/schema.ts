@@ -83,12 +83,20 @@ export const bookings = mysqlTable("bookings", {
   contact: varchar("contact", { length: 64 }),
   customerAccountId: int("customerAccountId"), // links online bookings to an optional customer account
   channel: mysqlEnum("channel", ["online", "walkin"]).default("online").notNull(),
-  paymentStatus: mysqlEnum("paymentStatus", ["pending", "paid", "cancelled"]).default("pending").notNull(),
+  // 'cancelled' is a human decision; 'expired' is nobody paying in time. The
+  // venue's abandonment numbers depend on the two staying apart.
+  paymentStatus: mysqlEnum("paymentStatus", ["pending", "paid", "cancelled", "expired"]).default("pending").notNull(),
   paymentMethod: varchar("paymentMethod", { length: 32 }), // cash, gcash, card
   dayAmount: decimal("dayAmount", { precision: 10, scale: 2 }).default("0"),
   nightAmount: decimal("nightAmount", { precision: 10, scale: 2 }).default("0"),
   totalAmount: decimal("totalAmount", { precision: 10, scale: 2 }).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  /**
+   * When an unpaid booking stops holding its court. Only pending bookings get
+   * one; a booking already settled at the counter holds its slot for good, so
+   * it stays null.
+   */
+  expiresAt: timestamp("expiresAt"),
   /**
    * Slot key for bookings that still hold their court, and NULL for any that
    * released it. A unique index permits many NULL rows, so cancelled bookings

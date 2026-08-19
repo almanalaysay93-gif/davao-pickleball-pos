@@ -464,6 +464,152 @@ describe("bookings.create + conflict detection", () => {
   });
 });
 
+describe("pending booking hold", () => {
+  const HOLD_MS = 20 * 60 * 1000;
+
+  it("gives a publicly created pending booking a 20 minute expiry", async () => {
+    const day = "2026-12-15"; // isolated future date; no other test touches it
+    const guestCaller = appRouter.createCaller(guestCtx());
+    const adminCaller = appRouter.createCaller(adminCtx());
+    const venuesList = await guestCaller.venues.list();
+    const arena = venuesList.find(v => v.name === "Arena Athletics")!;
+    const courtList = await guestCaller.courts.byVenue({ venueId: arena.id });
+    const court = courtList.find(c => c.status === "available")!;
+
+    const rawDb = await getDb();
+    const clear = async () => {
+      if (rawDb) {
+        await rawDb
+          .delete(bookingsTable)
+          .where(and(eq(bookingsTable.courtId, court.id), eq(bookingsTable.playerDate, day)))
+          .catch(() => undefined);
+      }
+    };
+    await clear();
+
+    try {
+      const before = Date.now();
+      const created = await guestCaller.bookings.create({
+        venueId: arena.id,
+        courtId: court.id,
+        playerDate: day,
+        startHour: "09:00",
+        endHour: "10:00",
+        playerName: "Holds A Slot",
+        channel: "online",
+      });
+      const after = Date.now();
+
+      const all = await adminCaller.bookings.list();
+      const row = all.find(b => b.reference === created.reference);
+      if (!row) throw new Error("Created booking not found in admin list");
+
+      expect(row.paymentStatus).toBe("pending");
+      expect(row.expiresAt).toBeInstanceOf(Date);
+      // MySQL stores timestamps to the second, so allow a second of slack.
+      const expiry = row.expiresAt!.getTime();
+      expect(expiry).toBeGreaterThanOrEqual(before + HOLD_MS - 1000);
+      expect(expiry).toBeLessThanOrEqual(after + HOLD_MS + 1000);
+    } finally {
+      await clear();
+    }
+  });
+
+  it("leaves a booking settled at the counter with no expiry", async () => {
+    const day = "2026-12-16"; // isolated future date; no other test touches it
+    const adminCaller = appRouter.createCaller(adminCtx());
+    const venuesList = await adminCaller.venues.list();
+    const arena = venuesList.find(v => v.name === "Arena Athletics")!;
+    const courtList = await adminCaller.courts.byVenue({ venueId: arena.id });
+    const court = courtList.find(c => c.status === "available")!;
+
+    const rawDb = await getDb();
+    const clear = async () => {
+      if (rawDb) {
+        await rawDb
+          .delete(bookingsTable)
+          .where(and(eq(bookingsTable.courtId, court.id), eq(bookingsTable.playerDate, day)))
+          .catch(() => undefined);
+      }
+    };
+    await clear();
+
+    try {
+      const created = await adminCaller.owner.createBooking({
+        venueId: arena.id,
+        courtId: court.id,
+        playerDate: day,
+        startHour: "09:00",
+        endHour: "10:00",
+        playerName: "Paid At Counter",
+        channel: "walkin",
+        paymentMethod: "cash",
+      });
+
+      const all = await adminCaller.bookings.list();
+      const row = all.find(b => b.reference === created.reference);
+      if (!row) throw new Error("Created booking not found in admin list");
+
+      // Cash already changed hands, so nothing may take this slot back.
+      expect(row.paymentStatus).toBe("paid");
+      expect(row.expiresAt).toBeNull();
+    } finally {
+      await clear();
+    }
+  });
+
+  it("frees the slot once a pending booking is marked expired, and keeps it apart from cancelled", async () => {
+    const day = "2026-12-17"; // isolated future date; no other test touches it
+    const guestCaller = appRouter.createCaller(guestCtx());
+    const adminCaller = appRouter.createCaller(adminCtx());
+    const venuesList = await guestCaller.venues.list();
+    const arena = venuesList.find(v => v.name === "Arena Athletics")!;
+    const courtList = await guestCaller.courts.byVenue({ venueId: arena.id });
+    const court = courtList.find(c => c.status === "available")!;
+
+    const rawDb = await getDb();
+    const clear = async () => {
+      if (rawDb) {
+        await rawDb
+          .delete(bookingsTable)
+          .where(and(eq(bookingsTable.courtId, court.id), eq(bookingsTable.playerDate, day)))
+          .catch(() => undefined);
+      }
+    };
+    await clear();
+
+    try {
+      const slot = {
+        venueId: arena.id,
+        courtId: court.id,
+        playerDate: day,
+        startHour: "09:00",
+        endHour: "10:00",
+        channel: "online" as const,
+      };
+
+      const first = await guestCaller.bookings.create({ ...slot, playerName: "Never Paid" });
+      const target = (await adminCaller.bookings.list()).find(b => b.reference === first.reference);
+      if (!target) throw new Error("Created booking not found in admin list");
+
+      // The sweep that writes this status is a later slice, so drive the
+      // transition directly and check what the rest of the system makes of it.
+      await db.updateBookingStatus(target.id, { paymentStatus: "expired" });
+
+      // Nobody paid, so the court goes back on the market.
+      const second = await guestCaller.bookings.create({ ...slot, playerName: "Paid In Time" });
+      expect(second.reference).not.toBe(first.reference);
+
+      // 'expired' and 'cancelled' answer different questions in the venue's
+      // reports, so the abandoned booking must not read as a human decision.
+      const after = await adminCaller.bookings.list();
+      expect(after.find(b => b.id === target.id)?.paymentStatus).toBe("expired");
+    } finally {
+      await clear();
+    }
+  });
+});
+
 describe("admin authorization", () => {
   const adminInput = { id: 1 };
 

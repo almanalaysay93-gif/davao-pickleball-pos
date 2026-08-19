@@ -1,0 +1,1 @@
+ALTER TABLE `bookings` MODIFY COLUMN `paymentStatus` enum('pending','paid','cancelled','expired') NOT NULL DEFAULT 'pending';
