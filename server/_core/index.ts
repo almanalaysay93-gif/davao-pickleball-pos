@@ -7,7 +7,8 @@ import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
 import { registerStorageProxy } from "./storageProxy";
 import { registerPaymongoWebhook } from "../webhooks";
-import { appRouter } from "../routers";
+import { appRouter, getAuthPool } from "../routers";
+import { warnIfNoMasterAdmin } from "../adminBootstrap";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 
@@ -71,6 +72,9 @@ async function startServer() {
 
   server.listen(port, () => {
     console.log(`Server running on http://localhost:${port}/`);
+    // After listening, not before. A database that is slow to answer should
+    // delay a log line, not the server coming up.
+    void warnIfNoMasterAdmin(getAuthPool());
   });
 }
 

@@ -36,7 +36,7 @@ const globalAdminProcedure = publicProcedure.use(({ ctx, next }) => {
 });
 
 let pool: mysql.Pool | null = null;
-function getAuthPool(): mysql.Pool {
+export function getAuthPool(): mysql.Pool {
   if (!pool && process.env.DATABASE_URL) pool = mysql.createPool(process.env.DATABASE_URL);
   return pool!;
 }

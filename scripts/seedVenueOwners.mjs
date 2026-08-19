@@ -1,33 +1,36 @@
-// Seeds venue-specific owner credentials (username = venue name) so each
-// of the 8 Davao venues gets its own owner login. Global system owner row
-// (id 1) is left untouched. Run: node --import tsx scripts/seedVenueOwners.mjs
-// from the project root.
+// Gives every venue in the database its own owner login, so a development
+// database can be signed in to as any single venue rather than only as the
+// master admin. Run from the project root:
+//
+//   node --import tsx scripts/seedVenueOwners.mjs
+//
+// Development only. The password below is in this repository, which is exactly
+// why scripts/bootstrapAdmin.mjs refuses it: the master admin is created by a
+// person choosing a password, never by a script carrying one.
 import "dotenv/config";
 import { drizzle } from "drizzle-orm/mysql2";
+import { eq } from "drizzle-orm";
 import bcrypt from "bcryptjs";
-import { ownerCredentials } from "../drizzle/schema.ts";
+import { ownerCredentials, venues } from "../drizzle/schema.ts";
+
+if (!process.env.DATABASE_URL) {
+  console.error("DATABASE_URL is not set.");
+  process.exit(1);
+}
 
 const db = drizzle(process.env.DATABASE_URL);
+const hash = await bcrypt.hash("Davao2026!", 12);
 
-const password = "Davao2026!";
-const hash = await bcrypt.hash(password, 12);
+// Read the venues rather than repeat them. The previous list was written out
+// by hand and had already drifted from the seed it was meant to match, so a
+// renamed venue got a login under its old name and nobody could sign in to it.
+const rows = await db.select({ id: venues.id, name: venues.name }).from(venues).orderBy(venues.id);
 
-const venues = [
-  { id: 1, name: "Arena Athletics" },
-  { id: 2, name: "Southside Davao" },
-  { id: 3, name: "Matina Town Square" },
-  { id: 4, name: "Paddle Up Davao" },
-  { id: 5, name: "CrisRon" },
-  { id: 6, name: "PickleVille" },
-  { id: 7, name: "Durian Pickleball House" },
-  { id: 8, name: "929 Pickleyard" },
-];
-
-for (const v of venues) {
+for (const v of rows) {
   const existing = await db
-    .select()
+    .select({ id: ownerCredentials.id })
     .from(ownerCredentials)
-    .where({ username: v.name });
+    .where(eq(ownerCredentials.username, v.name));
   if (existing.length > 0) {
     console.log(`skip (exists): ${v.name}`);
     continue;
@@ -39,5 +42,5 @@ for (const v of venues) {
   });
   console.log(`created: ${v.name} -> venue ${v.id}`);
 }
-console.log("done");
+console.log(`done: ${rows.length} venues`);
 process.exit(0);
