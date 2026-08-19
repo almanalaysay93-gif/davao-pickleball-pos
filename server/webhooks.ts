@@ -146,6 +146,12 @@ async function handlePaidEvent(sessionId: string): Promise<void> {
   }
 
   await settleBookingPaid(booking.id, session.paidMethod ?? "gcash");
+  // Worth a line even though nothing went wrong. This is the moment a court
+  // stops being a hold and starts being sold, and when a venue asks why a
+  // booking is paid, the answer is either this line or a member of staff.
+  console.log(
+    `[webhook] booking ${booking.reference} settled as paid via ${session.paidMethod ?? "gcash"}.`,
+  );
 }
 
 async function onRequest(req: Request, res: Response): Promise<void> {
