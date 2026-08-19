@@ -26,9 +26,7 @@ const PAID_EVENT = "checkout_session.payment.paid";
  * Split the Paymongo-Signature header.
  *
  * The header is three comma-separated fields: t is the timestamp, te is the
- * digest for test mode and li the digest for live mode. Test and live are
- * separate values on purpose, and accepting either would mean a test-mode
- * forgery is enough to settle a live booking.
+ * digest for test mode and li the digest for live mode.
  */
 function parseSignature(header: string): { t?: string; te?: string; li?: string } {
   const out: Record<string, string> = {};
@@ -49,6 +47,22 @@ function digestsMatch(a: string, b: string): boolean {
 }
 
 /**
+ * Which of the two signature fields applies to this account.
+ *
+ * The webhook secret cannot answer this. A secret issued by the test-mode
+ * dashboard reads whsk_ followed by random characters, exactly like a live
+ * one, so reading the mode off it would guess. The API secret key does carry
+ * the marker, and both credentials belong to the same PayMongo account and the
+ * same mode, so the key is the honest source.
+ *
+ * Absent or unrecognised keys count as live. Being strict about a signature is
+ * the safe direction to be wrong in.
+ */
+function isLiveMode(): boolean {
+  return !process.env.PAYMONGO_SECRET_KEY?.trim().startsWith("sk_test_");
+}
+
+/**
  * Whether this request really came from PayMongo.
  *
  * The signed string is the timestamp, a period, then the raw request body, and
@@ -56,6 +70,10 @@ function digestsMatch(a: string, b: string): boolean {
  * the body must not have passed through a JSON parser on its way here. That is
  * why the route below mounts its own express.raw and why it is registered
  * before the app's parser.
+ *
+ * te and li are separate digests for test and live. Only the one matching this
+ * account's mode is accepted; taking whichever is present would mean a
+ * test-mode forgery could settle a live booking.
  *
  * The timestamp is not checked against a window. PayMongo retries a failed
  * delivery for days, and a legitimate retry carries the timestamp of the
@@ -71,8 +89,7 @@ export function verifyPaymongoSignature(
   const { t, te, li } = parseSignature(header);
   if (!t) return false;
 
-  const livemode = !secret.startsWith("whsk_test");
-  const claimed = livemode ? li : te;
+  const claimed = isLiveMode() ? li : te;
   if (!claimed) return false;
 
   const expected = createHmac("sha256", secret)

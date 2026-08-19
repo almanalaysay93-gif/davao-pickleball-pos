@@ -10,7 +10,13 @@ import * as db from "./db";
 import { getDb, listVenues } from "./db";
 
 const day = "2027-11-14";
-const SECRET = "whsk_test_fixture_secret";
+/**
+ * Shaped like a real one. PayMongo's webhook secrets carry no test or live
+ * marker - the value from a test-mode dashboard is whsk_ and then random - so
+ * a fixture named "whsk_test_..." would let a mode check that reads this
+ * string pass here and reject every genuine delivery.
+ */
+const SECRET = "whsk_EyQVmFixtureSecret000000";
 const KEY = "sk_test_webhooks_unit";
 
 /**
@@ -29,7 +35,7 @@ const FIXTURE = {
   body:
     '{"data":{"id":"evt_fixture","type":"event","attributes":{"type":"checkout_session.payment.paid",' +
     '"data":{"id":"cs_fixture","type":"checkout_session","attributes":{"metadata":{"reference":"FIXTUREREF"}}}}}}',
-  signature: "0b8ee403bc19409be8020b9384a4a5575d5d36b845067c55ba38e5f0dfea6ca7",
+  signature: "7dec81f8f5f9bc345da2e1bf29861666b2694d6905487af85c061369fc3a4fdc",
 };
 
 let server: http.Server;
@@ -204,6 +210,28 @@ describe("PayMongo webhook signature", () => {
       "paymongo-signature": `t=${t},li=${digest}`,
     });
     expect(res.status).toBe(401);
+  });
+
+  it("takes the live digest when the account's key is a live one", async () => {
+    // The mode cannot be read off the webhook secret, so it is read off the
+    // API key. This is the other half of that: a live account must accept li
+    // and refuse te, exactly reversing the test-mode case above.
+    vi.stubEnv("PAYMONGO_SECRET_KEY", "sk_live_not_a_real_key");
+    const body = paidEvent("cs_unknown");
+    const { createHmac } = await import("node:crypto");
+    const t = String(Math.floor(Date.now() / 1000));
+    const digest = createHmac("sha256", SECRET).update(`${t}.${body}`).digest("hex");
+    stubPayMongo(paidSession);
+
+    const accepted = await post("/api/webhooks/paymongo", body, {
+      "paymongo-signature": `t=${t},li=${digest}`,
+    });
+    const refused = await post("/api/webhooks/paymongo", body, {
+      "paymongo-signature": `t=${t},te=${digest}`,
+    });
+
+    expect(accepted.status).toBe(200);
+    expect(refused.status).toBe(401);
   });
 
   it("refuses every request when no webhook secret is configured", async () => {
