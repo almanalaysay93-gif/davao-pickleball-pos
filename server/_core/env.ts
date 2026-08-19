@@ -1,6 +1,8 @@
 export const ENV = {
   appId: process.env.VITE_APP_ID ?? "",
-  cookieSecret: process.env.JWT_SECRET ?? "",
+  // JWT_SECRET is deliberately absent. It is read through
+  // getSessionSecret() in server/auth.ts, which refuses an empty or weak one
+  // instead of defaulting to "" and signing sessions anybody could forge.
   databaseUrl: process.env.DATABASE_URL ?? "",
   oAuthServerUrl: process.env.OAUTH_SERVER_URL ?? "",
   ownerOpenId: process.env.OWNER_OPEN_ID ?? "",

@@ -5,6 +5,7 @@ import { parse as parseCookieHeader } from "cookie";
 import type { Request } from "express";
 import { SignJWT, jwtVerify } from "jose";
 import type { User } from "../../drizzle/schema";
+import { getSessionSecret as sessionSecret } from "../auth";
 import * as db from "../db";
 import { ENV } from "./env";
 import type {
@@ -154,8 +155,11 @@ class SDKServer {
   }
 
   private getSessionSecret() {
-    const secret = ENV.cookieSecret;
-    return new TextEncoder().encode(secret);
+    // The same key auth.ts signs with, and through the same guard. This used to
+    // read ENV.cookieSecret, which fell back to an empty string: jose signs
+    // happily with zero bytes, so an unconfigured deployment issued OAuth
+    // sessions anybody could forge.
+    return new TextEncoder().encode(sessionSecret());
   }
 
   /**

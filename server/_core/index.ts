@@ -9,6 +9,7 @@ import { registerStorageProxy } from "./storageProxy";
 import { registerPaymongoWebhook } from "../webhooks";
 import { appRouter, getAuthPool } from "../routers";
 import { warnIfNoMasterAdmin } from "../adminBootstrap";
+import { assertSessionSecret } from "../auth";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 
@@ -32,6 +33,10 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 }
 
 async function startServer() {
+  // First, before a port is opened. A server that cannot sign a session cookie
+  // safely should not accept a request it would have to answer with one.
+  assertSessionSecret();
+
   const app = express();
   const server = createServer(app);
   // Before the JSON parser, and it has to stay there. PayMongo signs the raw
@@ -78,4 +83,10 @@ async function startServer() {
   });
 }
 
-startServer().catch(console.error);
+// A server that failed to start has to say so in its exit code. Logging and
+// exiting 0 reads as a clean shutdown to systemd, Docker, and Railway alike,
+// so a deployment missing JWT_SECRET would be reported as a success.
+startServer().catch(err => {
+  console.error(err);
+  process.exit(1);
+});
