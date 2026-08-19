@@ -1,9 +1,9 @@
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { formatHour, formatPHP } from "@shared/rates";
-import { BadgeCheck, CalendarDays, CircleDollarSign, Clock, MapPin, Printer } from "lucide-react";
+import { BadgeCheck, CalendarDays, CircleAlert, CircleDollarSign, Clock, MapPin, Printer } from "lucide-react";
 import { Link, useRoute } from "wouter";
 import { trpc } from "@/lib/trpc";
+import { PlayerStatusBadge } from "@/components/BookingStatus";
 import { useBooking } from "@/contexts/BookingContext";
 import { VenueLocation } from "@/components/VenueLocation";
 import { useEffect } from "react";
@@ -17,6 +17,11 @@ export default function Confirmation() {
     { reference },
     { enabled: Boolean(reference), refetchOnWindowFocus: false },
   );
+
+  // Only 'paid' and 'pending' still hold the court. While the booking is
+  // loading there is nothing to warn about yet, so the page stays optimistic.
+  const status = data?.booking.paymentStatus;
+  const holdsCourt = status === undefined || status === "paid" || status === "pending";
 
   // Clear the booking draft once confirmed — the transaction is done.
   useEffect(() => {
@@ -38,15 +43,27 @@ export default function Confirmation() {
   return (
     <div className="container py-12 md:py-16 fade-in">
       <div className="max-w-md mx-auto">
+        {/* Wording follows the status. A booking whose hold lapsed no longer
+            holds its court, and telling the player it is secured sends them to
+            a venue that has already resold the slot. */}
         <div className="text-center">
-          <span className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-success/15">
-            <BadgeCheck className="h-9 w-9 text-success" />
+          <span
+            className={`mx-auto flex h-16 w-16 items-center justify-center rounded-full ${
+              holdsCourt ? "bg-success/15" : "bg-destructive/10"
+            }`}>
+            {holdsCourt ? (
+              <BadgeCheck className="h-9 w-9 text-success" />
+            ) : (
+              <CircleAlert className="h-9 w-9 text-destructive" />
+            )}
           </span>
           <h1 className="mt-5 font-display text-3xl font-semibold text-balance">
-            Booking confirmed
+            {holdsCourt ? "Booking confirmed" : "This booking is no longer held"}
           </h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            Your reservation is secured. Present this receipt at the venue.
+            {holdsCourt
+              ? "Your reservation is secured. Present this receipt at the venue."
+              : "The court has been released and this receipt is not valid for entry. Book again to reserve a slot."}
           </p>
         </div>
 
@@ -59,14 +76,7 @@ export default function Confirmation() {
               <p className="text-xs uppercase tracking-[0.24em] opacity-75">Booking reference</p>
               <p className="mt-1 font-display text-2xl font-bold tracking-wide">{reference}</p>
               <div className="mt-2">
-                <Badge
-                  className={
-                    data.booking.paymentStatus === "paid"
-                      ? "bg-success/90 text-success-foreground border-0"
-                      : "bg-warning/90 text-warning-foreground border-0"
-                  }>
-                  {data.booking.paymentStatus === "paid" ? "Paid" : "Payment pending"}
-                </Badge>
+                <PlayerStatusBadge status={data.booking.paymentStatus} />
               </div>
             </div>
 

@@ -34,6 +34,7 @@ import { BadgeCheck, BadgeX, Clock, DoorOpen, Loader2, ReceiptText, Wrench, User
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
+import { StatusBadge } from "@/components/BookingStatus";
 
 export default function Admin() {
   const { user, loading: authLoading } = useAuth();
@@ -105,9 +106,14 @@ function AdminDashboard() {
       }
       if (b.paymentStatus === "pending") acc.pending += 1;
       if (b.paymentStatus === "cancelled") acc.cancelled += 1;
+      // Expired holds are counted apart from cancelled ones. A cancelled
+      // booking is somebody's decision; an expired one is a checkout nobody
+      // finished, which is the number that says how much business is being
+      // lost at the payment step.
+      if (b.paymentStatus === "expired") acc.expired += 1;
       return acc;
     },
-    { paid: 0, pending: 0, cancelled: 0, revenue: 0 },
+    { paid: 0, pending: 0, cancelled: 0, expired: 0, revenue: 0 },
   );
 
   return (
@@ -125,11 +131,19 @@ function AdminDashboard() {
       </div>
 
       {/* Stats */}
-      <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4 stagger">
+      <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-5 stagger">
         <StatCard label="Paid bookings" value={stats.paid} accent="text-success" />
         <StatCard label="Pending payment" value={stats.pending} accent="text-warning" />
+        <StatCard label="Expired" value={stats.expired} accent="text-destructive" />
         <StatCard label="Cancelled" value={stats.cancelled} accent="text-muted-foreground" />
-        <StatCard label="Revenue (paid)" value={formatPHP(stats.revenue)} accent="text-primary" />
+        {/* Five cards divide evenly at lg. Below that they wrap two per row,
+            so the last one spans the pair to avoid a half-empty final row. */}
+        <StatCard
+          label="Revenue (paid)"
+          value={formatPHP(stats.revenue)}
+          accent="text-primary"
+          className="sm:col-span-2 lg:col-span-1"
+        />
       </div>
 
       {/* Bookings table */}
@@ -233,23 +247,15 @@ function AdminDashboard() {
   );
 }
 
-function StatCard({ label, value, accent }: { label: string; value: string | number; accent: string }) {
+function StatCard({ label, value, accent, className = "" }: { label: string; value: string | number; accent: string; className?: string }) {
   return (
-    <Card className="border-border bg-card">
+    <Card className={`border-border bg-card ${className}`.trim()}>
       <CardContent className="p-5">
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">{label}</p>
         <p className={`mt-1.5 text-2xl font-bold ${accent}`}>{value}</p>
       </CardContent>
     </Card>
   );
-}
-
-function StatusBadge({ status }: { status: string }) {
-  if (status === "paid")
-    return <Badge className="bg-success/15 text-success border-0">Paid</Badge>;
-  if (status === "cancelled")
-    return <Badge variant="outline" className="text-muted-foreground">Cancelled</Badge>;
-  return <Badge className="bg-warning/20 text-warning-foreground border-0">Pending</Badge>;
 }
 
 function PayDialog({ bookingId, onDone }: { bookingId: number; onDone: () => void }) {

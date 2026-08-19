@@ -39,6 +39,7 @@ import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Link, useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
+import { StatusBadge, type BookingStatus } from "@/components/BookingStatus";
 
 export default function Owner() {
   const { user, loading: authLoading } = useAuth();
@@ -99,7 +100,7 @@ function OwnerDashboard() {
           playerName: string;
           channel: string;
           totalAmount: string;
-          paymentStatus: string;
+          paymentStatus: BookingStatus;
         };
         venue: { id: number; name: string; address: string } | null;
       }[],
@@ -130,9 +131,14 @@ function OwnerDashboard() {
           acc.revenue += Number(booking.totalAmount);
         }
         if (booking.paymentStatus === "pending") acc.pending += 1;
+        // Counted apart from cancelled bookings: an expired hold is a checkout
+        // nobody finished, which is what tells the venue how much business is
+        // being lost at the payment step.
+        if (booking.paymentStatus === "expired") acc.expired += 1;
+        if (booking.paymentStatus === "cancelled") acc.cancelled += 1;
         return acc;
       },
-      { paid: 0, pending: 0, revenue: 0 },
+      { paid: 0, pending: 0, expired: 0, cancelled: 0, revenue: 0 },
     );
   }, [bookings.data]);
 
@@ -184,10 +190,14 @@ function OwnerDashboard() {
         <h1 className="mt-3 text-3xl md:text-4xl font-semibold text-balance">My Venues</h1>
       </div>
 
-      <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4 stagger">
+      {/* Six cards: two per row on small screens, three on large. Both divide
+          evenly, so no row is left half empty. */}
+      <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 stagger">
         <StatCard label="Owned venues" value={venues.data.length} accent="text-primary" />
         <StatCard label="Paid bookings" value={stats.paid} accent="text-success" />
         <StatCard label="Pending payment" value={stats.pending} accent="text-warning" />
+        <StatCard label="Expired" value={stats.expired} accent="text-destructive" />
+        <StatCard label="Cancelled" value={stats.cancelled} accent="text-muted-foreground" />
         <StatCard label="Revenue (paid)" value={formatPHP(stats.revenue)} accent="text-primary" />
       </div>
 
@@ -616,7 +626,7 @@ type BookingsQuery = {
       playerName: string;
       channel: string;
       totalAmount: string;
-      paymentStatus: string;
+      paymentStatus: BookingStatus;
     };
     venue: { id: number; name: string; address: string } | null;
   }[];
@@ -933,14 +943,6 @@ function StatCard({ label, value, accent }: { label: string; value: string | num
       </CardContent>
     </Card>
   );
-}
-
-function StatusBadge({ status }: { status: string }) {
-  if (status === "paid")
-    return <Badge className="bg-success/15 text-success border-0">Paid</Badge>;
-  if (status === "cancelled")
-    return <Badge variant="outline" className="text-muted-foreground">Cancelled</Badge>;
-  return <Badge className="bg-warning/20 text-warning-foreground border-0">Pending</Badge>;
 }
 
 function AddCourtDialog({ venueId }: { venueId: number }) {

@@ -2,7 +2,6 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   AlertDialog,
@@ -16,9 +15,9 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { trpc } from "@/lib/trpc";
+import { PlayerStatusBadge } from "@/components/BookingStatus";
 import { formatPHP, formatHour, formatDate } from "@shared/rates";
 import {
-  BadgeCheck,
   CalendarDays,
   Clock,
   Link2,
@@ -273,18 +272,7 @@ function BookingList({
             <span className="font-mono text-xs font-semibold tracking-wider text-primary">
               {booking.reference}
             </span>
-            <Badge
-              variant={booking.paymentStatus === "paid" ? "default" : "secondary"}
-              className={
-                booking.paymentStatus === "paid"
-                  ? "bg-emerald-600 text-white hover:bg-emerald-600"
-                  : ""
-              }>
-              {booking.paymentStatus === "paid" ? (
-                <BadgeCheck className="mr-1 h-3 w-3" />
-              ) : null}
-              {booking.paymentStatus === "paid" ? "Confirmed & paid" : "Pending payment"}
-            </Badge>
+            <PlayerStatusBadge status={booking.paymentStatus} />
           </div>
           <CardContent className="grid gap-4 p-5 sm:grid-cols-[1fr_auto]">
             <div className="space-y-1.5">

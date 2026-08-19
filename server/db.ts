@@ -475,7 +475,10 @@ export async function listOwnerBookings(venueIds: number[], opts?: { channel?: "
   const db = await getDb();
   if (!db) throw new Error("Database not available");
   if (venueIds.length === 0) return [];
-  const conditions = [inArray(bookings.venueId, venueIds), inArray(bookings.paymentStatus, ["pending", "paid"])];
+  // Every status, not only the ones still holding a court. The owner dashboard
+  // counts expired and cancelled bookings, and filtering them out here would
+  // leave those figures reading zero however many checkouts were abandoned.
+  const conditions = [inArray(bookings.venueId, venueIds)];
   if (opts?.channel) conditions.push(eq(bookings.channel, opts.channel));
   return db
     .select()
