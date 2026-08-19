@@ -47,7 +47,7 @@ export default function CustomerLayout({ children }: { children: ReactNode }) {
             </span>
           </Link>
 
-          <nav className="hidden md:flex items-center gap-1">
+          <nav className="hidden lg:flex items-center gap-1">
             {navLinks.map(l => (
               <Link
                 key={l.href}
@@ -80,7 +80,7 @@ export default function CustomerLayout({ children }: { children: ReactNode }) {
           <div className="flex items-center gap-2">
             {signedInCustomer ? (
               <div className="flex items-center gap-2">
-                <span className="hidden md:flex items-center gap-2 text-sm text-muted-foreground">
+                <span className="hidden lg:flex items-center gap-2 text-sm text-muted-foreground">
                   <UserRound className="h-4 w-4" />
                   <span className="max-w-28 truncate">{user.name ?? user.identity}</span>
                 </span>
@@ -105,7 +105,7 @@ export default function CustomerLayout({ children }: { children: ReactNode }) {
             <Button
               variant="ghost"
               size="icon"
-              className="md:hidden"
+              className="lg:hidden"
               onClick={() => setMobileOpen(v => !v)}
               aria-label="Toggle menu">
               {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
@@ -114,7 +114,7 @@ export default function CustomerLayout({ children }: { children: ReactNode }) {
         </div>
 
         {mobileOpen && (
-          <nav className="md:hidden border-t border-border bg-background px-4 py-3 flex flex-col gap-1 fade-in">
+          <nav className="lg:hidden border-t border-border bg-background px-4 py-3 flex flex-col gap-1 fade-in">
             {navLinks.map(l => (
               <Link
                 key={l.href}
