@@ -1,0 +1,1 @@
+CREATE INDEX `bookings_court_day_idx` ON `bookings` (`courtId`,`playerDate`);

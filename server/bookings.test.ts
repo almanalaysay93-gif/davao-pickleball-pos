@@ -464,6 +464,117 @@ describe("bookings.create + conflict detection", () => {
   });
 });
 
+describe("concurrent slot races", () => {
+  // A far-future date nothing else in the suite touches, so these tests never
+  // race the rest of the file for the same court.
+  const day = "2027-09-09";
+
+  async function arenaCourt() {
+    const caller = appRouter.createCaller(guestCtx());
+    const venues = await caller.venues.list();
+    const arena = venues.find(v => v.name === "Arena Athletics")!;
+    const courts = await caller.courts.byVenue({ venueId: arena.id });
+    const court = courts.find(c => c.status === "available")!;
+    return { caller, arena, court };
+  }
+
+  function scopeOf(courtId: number) {
+    return and(eq(bookingsTable.courtId, courtId), eq(bookingsTable.playerDate, day));
+  }
+
+  it("lets only one of two overlapping bookings through when they arrive together", async () => {
+    const { caller, arena, court } = await arenaCourt();
+    const rawDb = await getDb();
+    const scope = scopeOf(court.id);
+    if (rawDb) await rawDb.delete(bookingsTable).where(scope);
+    try {
+      const book = (startHour: string, endHour: string, playerName: string) =>
+        caller.bookings.create({
+          venueId: arena.id, courtId: court.id, playerDate: day,
+          startHour, endHour, playerName, channel: "online",
+        });
+
+      // Different start hours, overlapping ranges. Both fall under the same
+      // court and date, so at most one of them may hold 09:00-10:00.
+      const results = await Promise.allSettled([
+        book("08:00", "10:00", "Player A"),
+        book("09:00", "10:00", "Player B"),
+      ]);
+
+      const won = results.filter(r => r.status === "fulfilled");
+      const lost = results.filter(r => r.status === "rejected");
+      expect(won).toHaveLength(1);
+      expect(lost).toHaveLength(1);
+
+      // The loser must learn the slot was taken, not read a driver error.
+      const reason = String((lost[0] as PromiseRejectedResult).reason?.message ?? "");
+      expect(reason).toMatch(/already booked/i);
+      expect(reason).not.toMatch(/insert into|params:|Failed query/i);
+
+      const rows = rawDb ? await rawDb.select().from(bookingsTable).where(scope) : [];
+      expect(rows).toHaveLength(1);
+    } finally {
+      if (rawDb) await rawDb.delete(bookingsTable).where(scope);
+    }
+  });
+
+  it("refuses to settle a booking that lapsed after staff opened the screen", async () => {
+    const { caller, arena, court } = await arenaCourt();
+    const rawDb = await getDb();
+    const scope = scopeOf(court.id);
+    if (rawDb) await rawDb.delete(bookingsTable).where(scope);
+    const spy = vi.spyOn(db, "getBookingById");
+    try {
+      // A player holds the slot, then walks away without paying.
+      const lapsed = await caller.bookings.create({
+        venueId: arena.id, courtId: court.id, playerDate: day,
+        startHour: "14:00", endHour: "15:00", playerName: "Walked Away", channel: "online",
+      });
+      const lapsedRow = (await db.getBookingByReference(lapsed.reference))!;
+
+      // The hold runs out and the sweep releases the court.
+      if (rawDb) {
+        await rawDb.update(bookingsTable)
+          .set({ paymentStatus: "expired" })
+          .where(eq(bookingsTable.id, lapsedRow.id));
+      }
+
+      // Someone else takes the freed slot.
+      await caller.bookings.create({
+        venueId: arena.id, courtId: court.id, playerDate: day,
+        startHour: "14:00", endHour: "15:00", playerName: "Took It", channel: "online",
+      });
+
+      // Staff had the old booking on screen before it lapsed, so the first
+      // read they act on still says pending. Only the read taken under the
+      // lock can be trusted.
+      spy.mockImplementationOnce(async () => ({ ...lapsedRow, paymentStatus: "pending" as const }));
+
+      const adminCaller = appRouter.createCaller(adminCtx());
+      let message = "";
+      await adminCaller.bookings
+        .markPaid({ id: lapsedRow.id, paymentMethod: "gcash" })
+        .then(() => { message = "RESOLVED"; })
+        .catch((err: unknown) => { message = String((err as Error).message); });
+
+      // It must not quietly succeed and hand the same slot to two players.
+      expect(message).not.toBe("RESOLVED");
+      // And the venue must read something they can act on, never the raw
+      // statement and its parameters.
+      expect(message).not.toMatch(/update `bookings`|params:|Failed query/i);
+      expect(message).toMatch(/expired|released|no longer/i);
+
+      // The competing booking keeps the court.
+      const rows = rawDb ? await rawDb.select().from(bookingsTable).where(scope) : [];
+      const paid = rows.filter(r => r.paymentStatus === "paid");
+      expect(paid).toHaveLength(0);
+    } finally {
+      spy.mockRestore();
+      if (rawDb) await rawDb.delete(bookingsTable).where(scope);
+    }
+  });
+});
+
 describe("pending booking hold", () => {
   const HOLD_MS = 20 * 60 * 1000;
 
@@ -511,6 +622,159 @@ describe("pending booking hold", () => {
       expect(expiry).toBeGreaterThanOrEqual(before + HOLD_MS - 1000);
       expect(expiry).toBeLessThanOrEqual(after + HOLD_MS + 1000);
     } finally {
+      await clear();
+    }
+  });
+
+  it("frees the slot once a hold has run out", async () => {
+    const day = "2026-12-18"; // isolated future date; no other test touches it
+    const guestCaller = appRouter.createCaller(guestCtx());
+    const adminCaller = appRouter.createCaller(adminCtx());
+    const venuesList = await guestCaller.venues.list();
+    const arena = venuesList.find(v => v.name === "Arena Athletics")!;
+    const courtList = await guestCaller.courts.byVenue({ venueId: arena.id });
+    const court = courtList.find(c => c.status === "available")!;
+
+    const rawDb = await getDb();
+    const clear = async () => {
+      if (rawDb) {
+        await rawDb
+          .delete(bookingsTable)
+          .where(and(eq(bookingsTable.courtId, court.id), eq(bookingsTable.playerDate, day)))
+          .catch(() => undefined);
+      }
+    };
+    await clear();
+
+    vi.useFakeTimers({ now: new Date("2026-09-01T12:00:00Z") });
+    try {
+      const slot = {
+        venueId: arena.id,
+        courtId: court.id,
+        playerDate: day,
+        startHour: "08:00",
+        endHour: "09:00",
+        channel: "online" as const,
+      };
+
+      const abandoned = await guestCaller.bookings.create({ ...slot, playerName: "Never Paid" });
+
+      // One minute past the 20 minute hold, so the court is back on the market.
+      vi.setSystemTime(new Date(Date.now() + HOLD_MS + 60_000));
+
+      const nextPlayer = await guestCaller.bookings.create({ ...slot, playerName: "Actually Pays" });
+      expect(nextPlayer.reference).not.toBe(abandoned.reference);
+
+      // The abandoned hold is recorded as expired, not cancelled: nobody decided
+      // anything, the clock simply ran out.
+      const all = await adminCaller.bookings.list();
+      const lapsed = all.find(b => b.reference === abandoned.reference);
+      if (!lapsed) throw new Error("Abandoned booking not found in admin list");
+      expect(lapsed.paymentStatus).toBe("expired");
+    } finally {
+      vi.useRealTimers();
+      await clear();
+    }
+  });
+
+  it("shows a lapsed hold as available again on the availability grid", async () => {
+    const day = "2026-12-19"; // isolated future date; no other test touches it
+    const guestCaller = appRouter.createCaller(guestCtx());
+    const venuesList = await guestCaller.venues.list();
+    const arena = venuesList.find(v => v.name === "Arena Athletics")!;
+    const courtList = await guestCaller.courts.byVenue({ venueId: arena.id });
+    const court = courtList.find(c => c.status === "available")!;
+
+    const rawDb = await getDb();
+    const clear = async () => {
+      if (rawDb) {
+        await rawDb
+          .delete(bookingsTable)
+          .where(and(eq(bookingsTable.courtId, court.id), eq(bookingsTable.playerDate, day)))
+          .catch(() => undefined);
+      }
+    };
+    await clear();
+
+    vi.useFakeTimers({ now: new Date("2026-09-01T12:00:00Z") });
+    try {
+      await guestCaller.bookings.create({
+        venueId: arena.id,
+        courtId: court.id,
+        playerDate: day,
+        startHour: "08:00",
+        endHour: "09:00",
+        playerName: "Never Paid",
+        channel: "online",
+      });
+
+      const takenNow = await guestCaller.availability.forVenueDate({ venueId: arena.id, playerDate: day });
+      const bookedCourt = takenNow.courts.find(c => c.id === court.id)!;
+      expect(bookedCourt.occupied).toContain("08:00");
+
+      vi.setSystemTime(new Date(Date.now() + HOLD_MS + 60_000));
+
+      // A player browsing after the hold ran out must be offered the slot.
+      const freeNow = await guestCaller.availability.forVenueDate({ venueId: arena.id, playerDate: day });
+      const freedCourt = freeNow.courts.find(c => c.id === court.id)!;
+      expect(freedCourt.occupied).not.toContain("08:00");
+    } finally {
+      vi.useRealTimers();
+      await clear();
+    }
+  });
+
+  it("refuses to mark a lapsed booking paid once someone else holds the slot", async () => {
+    const day = "2026-12-20"; // isolated future date; no other test touches it
+    const guestCaller = appRouter.createCaller(guestCtx());
+    const adminCaller = appRouter.createCaller(adminCtx());
+    const venuesList = await guestCaller.venues.list();
+    const arena = venuesList.find(v => v.name === "Arena Athletics")!;
+    const courtList = await guestCaller.courts.byVenue({ venueId: arena.id });
+    const court = courtList.find(c => c.status === "available")!;
+
+    const rawDb = await getDb();
+    const clear = async () => {
+      if (rawDb) {
+        await rawDb
+          .delete(bookingsTable)
+          .where(and(eq(bookingsTable.courtId, court.id), eq(bookingsTable.playerDate, day)))
+          .catch(() => undefined);
+      }
+    };
+    await clear();
+
+    vi.useFakeTimers({ now: new Date("2026-09-01T12:00:00Z") });
+    try {
+      const slot = {
+        venueId: arena.id,
+        courtId: court.id,
+        playerDate: day,
+        startHour: "08:00",
+        endHour: "09:00",
+        channel: "online" as const,
+      };
+
+      const abandoned = await guestCaller.bookings.create({ ...slot, playerName: "Never Paid" });
+      vi.setSystemTime(new Date(Date.now() + HOLD_MS + 60_000));
+      await guestCaller.bookings.create({ ...slot, playerName: "Actually Pays" });
+
+      const all = await adminCaller.bookings.list();
+      const lapsed = all.find(b => b.reference === abandoned.reference)!;
+      expect(lapsed.paymentStatus).toBe("expired");
+
+      // Staff must be turned away with an explanation. Forcing the row back to
+      // paid would rebuild its activeSlot key and collide with the player who
+      // now holds the court.
+      await expect(adminCaller.bookings.markPaid({ id: lapsed.id })).rejects.toThrow(/expired|no longer|pending/i);
+
+      // Whatever the failure looks like, it must never hand the venue a raw
+      // driver error carrying the SQL statement and its parameters.
+      await adminCaller.bookings.markPaid({ id: lapsed.id }).catch((err: unknown) => {
+        expect(String((err as Error).message)).not.toMatch(/insert into|update `bookings`|params:/i);
+      });
+    } finally {
+      vi.useRealTimers();
       await clear();
     }
   });

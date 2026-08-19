@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, inArray, like, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, like, lt, lte, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   announcements,
@@ -28,6 +28,47 @@ export async function getDb() {
     }
   }
   return _db;
+}
+
+type Database = NonNullable<Awaited<ReturnType<typeof getDb>>>;
+
+/**
+ * Either the pooled connection or an open transaction. Every booking function
+ * that can run inside the court-day lock takes one of these, so the caller
+ * decides whether the statement joins the locked section or stands alone.
+ */
+export type Executor = Database | Parameters<Parameters<Database["transaction"]>[0]>[0];
+
+/**
+ * Run fn with exclusive claim over one court.
+ *
+ * Overlapping bookings cannot be rejected by a unique index. '08:00-10:00' and
+ * '09:00-10:00' collide as ranges but differ as key values, and MySQL has no
+ * exclusion constraint to express the difference. So the overlap check and the
+ * write it guards have to be one indivisible step instead.
+ *
+ * The lock is taken on the court's own row, not on the bookings it holds. The
+ * obvious alternative, locking the bookings range with FOR UPDATE, deadlocks:
+ * InnoDB gap locks do not conflict with each other, so two bookings for a free
+ * court-day both take the gap, then each one's insert waits on the other's gap
+ * and neither proceeds. A court row already exists, so locking it is an
+ * ordinary exclusive row lock with one ordering point and no deadlock.
+ *
+ * Granularity is the whole court rather than one of its days. That is the
+ * resource actually being contended, and a single court has no throughput to
+ * lose. Other courts stay fully parallel.
+ */
+export async function withCourtLock<T>(
+  courtId: number,
+  fn: (tx: Executor) => Promise<T>,
+): Promise<T> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return db.transaction(async tx => {
+    const held = await tx.select({ id: courts.id }).from(courts).where(eq(courts.id, courtId)).for("update");
+    if (held.length === 0) throw new Error(`Court ${courtId} not found`);
+    return fn(tx);
+  });
 }
 
 export async function upsertUser(user: InsertUser): Promise<void> {
@@ -175,8 +216,8 @@ export async function getBookingByReference(reference: string) {
   return rows[0];
 }
 
-export async function getBookingById(id: number) {
-  const db = await getDb();
+export async function getBookingById(id: number, executor?: Executor) {
+  const db = executor ?? (await getDb());
   if (!db) throw new Error("Database not available");
   const rows = await db.select().from(bookings).where(eq(bookings.id, id)).limit(1);
   return rows[0];
@@ -190,8 +231,9 @@ export async function findConflictingBooking(
   startHour: string,
   endHour: string,
   excludeBookingId?: number,
+  executor?: Executor,
 ) {
-  const db = await getDb();
+  const db = executor ?? (await getDb());
   if (!db) throw new Error("Database not available");
   return db
     .select()
@@ -210,11 +252,54 @@ export async function findConflictingBooking(
     .limit(1);
 }
 
-export async function insertBooking(data: InsertBooking) {
-  const db = await getDb();
+export async function insertBooking(data: InsertBooking, executor?: Executor) {
+  const db = executor ?? (await getDb());
   if (!db) throw new Error("Database not available");
   const result = await db.insert(bookings).values(data);
   return result;
+}
+
+/**
+ * Release every hold whose deadline has passed.
+ *
+ * This has to write, not filter. activeSlot is a stored generated column
+ * derived from paymentStatus, and the database cannot know the time, so a
+ * lapsed booking still left as 'pending' keeps producing a slot key and the
+ * unique index keeps turning the next player away. Only the status change
+ * frees the court.
+ *
+ * Bookings settled at the counter have a null expiresAt and never match.
+ *
+ * Pass a court and date when running inside withCourtLock. Sweeping the
+ * whole table there would take row locks outside the range the lock covers,
+ * and two transactions holding different courts would deadlock against each
+ * other's rows. Scoped to the locked court-day, it only touches rows the
+ * caller already holds.
+ *
+ * The cutoff is passed as a parameter rather than compared against SQL NOW(),
+ * because NOW() answers in the database session's timezone while expiresAt was
+ * written from the Node process. A non-UTC session would expire holds early or
+ * late by the offset.
+ */
+export async function expireStaleHolds(
+  now: Date = new Date(),
+  scope?: { courtId: number; playerDate: string },
+  executor?: Executor,
+) {
+  const db = executor ?? (await getDb());
+  if (!db) return;
+  await db
+    .update(bookings)
+    .set({ paymentStatus: "expired" })
+    .where(
+      and(
+        eq(bookings.paymentStatus, "pending"),
+        lt(bookings.expiresAt, now),
+        ...(scope
+          ? [eq(bookings.courtId, scope.courtId), eq(bookings.playerDate, scope.playerDate)]
+          : []),
+      ),
+    );
 }
 
 export async function updateBookingStatus(
@@ -235,8 +320,9 @@ export async function updateBookingStatus(
       | "endHour"
     >
   >,
+  executor?: Executor,
 ) {
-  const db = await getDb();
+  const db = executor ?? (await getDb());
   if (!db) throw new Error("Database not available");
   await db.update(bookings).set(patch).where(eq(bookings.id, id));
 }

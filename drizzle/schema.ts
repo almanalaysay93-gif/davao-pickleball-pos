@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { int, mysqlEnum, mysqlTable, text, timestamp, uniqueIndex, varchar, decimal } from "drizzle-orm/mysql-core";
+import { index, int, mysqlEnum, mysqlTable, text, timestamp, uniqueIndex, varchar, decimal } from "drizzle-orm/mysql-core";
 
 /**
  * Core user table backing auth flow.
@@ -108,10 +108,15 @@ export const bookings = mysqlTable("bookings", {
     { mode: "stored" },
   ),
 }, table => [
-  // The overlap check in findConflictingBooking reads before it writes, so
-  // concurrent requests for the same slot all pass it. The database is the
-  // only place that can settle the race.
+  // Catches two bookings claiming the identical start hour. It cannot catch
+  // overlapping ranges, because '08:00-10:00' and '09:00-10:00' are different
+  // key values and no unique index can say that two ranges intersect. Ranges
+  // are settled by the court-day lock instead; this stays as a backstop.
   uniqueIndex("bookings_active_slot_unique").on(table.activeSlot),
+  // The range lock in withCourtDayLock reads this index to decide what to
+  // lock. Without it MySQL has no range to gap-lock and takes out the whole
+  // table, so every booking at every venue would serialise behind one court.
+  index("bookings_court_day_idx").on(table.courtId, table.playerDate),
 ]);
 
 export type Booking = typeof bookings.$inferSelect;
