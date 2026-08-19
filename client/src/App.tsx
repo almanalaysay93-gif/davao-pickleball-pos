@@ -72,7 +72,12 @@ function App() {
     <ErrorBoundary>
       <ThemeProvider defaultTheme="light">
         <TooltipProvider>
-          <Toaster position="top-right" richColors />
+          {/* Below the header, not on top of it. Both layouts have a sticky
+              header about 64px tall whose right-hand end holds Sign Out and
+              System Admin, and a top-right toast covered them for its whole
+              duration - so the toast confirming an action hid the controls the
+              owner needed next. */}
+          <Toaster position="top-right" richColors offset="80px" />
           <BookingProvider>
             <Router />
           </BookingProvider>
