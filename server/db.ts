@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, inArray, like, lt, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, gte, inArray, like, lt, lte, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   announcements,
@@ -195,6 +195,18 @@ export async function listBookingsForVenueDate(venueId: number, playerDate: stri
     .orderBy(asc(bookings.startHour));
 }
 
+/**
+ * Every booking column, plus what the court is actually called.
+ *
+ * courtId is unique across all venues, so it is not the number painted on the
+ * court. A venue with five courts can hold ids 48 to 52, and printing those
+ * sends players to courts that venue does not have. The name travels with the
+ * row so no screen has to look it up, and so no screen can forget to.
+ */
+function bookingWithCourtName() {
+  return { ...getTableColumns(bookings), courtNumber: courts.courtNumber };
+}
+
 /** All bookings, newest first, with optional channel filter. */
 export async function listAllBookings(opts?: { channel?: "online" | "walkin"; limit?: number }) {
   const db = await getDb();
@@ -202,8 +214,9 @@ export async function listAllBookings(opts?: { channel?: "online" | "walkin"; li
   const conditions = [];
   if (opts?.channel) conditions.push(eq(bookings.channel, opts.channel));
   return db
-    .select()
+    .select(bookingWithCourtName())
     .from(bookings)
+    .leftJoin(courts, eq(courts.id, bookings.courtId))
     .where(conditions.length ? and(...conditions) : undefined)
     .orderBy(desc(bookings.createdAt))
     .limit(opts?.limit ?? 200);
@@ -533,8 +546,9 @@ export async function listOwnerBookings(venueIds: number[], opts?: { channel?: "
   const conditions = [inArray(bookings.venueId, venueIds)];
   if (opts?.channel) conditions.push(eq(bookings.channel, opts.channel));
   return db
-    .select()
+    .select(bookingWithCourtName())
     .from(bookings)
+    .leftJoin(courts, eq(courts.id, bookings.courtId))
     .where(and(...conditions))
     .orderBy(desc(bookings.createdAt))
     .limit(opts?.limit ?? 500);

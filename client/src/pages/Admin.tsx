@@ -192,7 +192,7 @@ function AdminDashboard() {
                           {b.reference}
                         </TableCell>
                         <TableCell>{venue?.name ?? `#${b.venueId}`}</TableCell>
-                        <TableCell>Court {b.courtId}</TableCell>
+                        <TableCell>{b.courtNumber ?? `Court #${b.courtId}`}</TableCell>
                         <TableCell>{b.playerDate}</TableCell>
                         <TableCell className="whitespace-nowrap">
                           {formatHour(b.startHour)} – {formatHour(b.endHour)}

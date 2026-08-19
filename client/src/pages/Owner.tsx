@@ -93,6 +93,7 @@ function OwnerDashboard() {
           id: number;
           venueId: number;
           courtId: number;
+          courtNumber: string | null;
           reference: string;
           playerDate: string;
           startHour: string;
@@ -259,7 +260,7 @@ function OwnerDashboard() {
                         {booking.reference}
                       </TableCell>
                       <TableCell>{venue?.name ?? `#${booking.venueId}`}</TableCell>
-                      <TableCell>Court {booking.courtId}</TableCell>
+                      <TableCell>{booking.courtNumber ?? `Court #${booking.courtId}`}</TableCell>
                       <TableCell>{booking.playerDate}</TableCell>
                       <TableCell className="whitespace-nowrap">
                         {formatHour(booking.startHour)} – {formatHour(booking.endHour)}
@@ -619,6 +620,7 @@ type BookingsQuery = {
       id: number;
       venueId: number;
       courtId: number;
+      courtNumber: string | null;
       reference: string;
       playerDate: string;
       startHour: string;
@@ -695,7 +697,7 @@ function OwnerBookingsSection({
                         {booking.reference}
                       </TableCell>
                       <TableCell>{venue?.name ?? `#${booking.venueId}`}</TableCell>
-                      <TableCell>Court {booking.courtId}</TableCell>
+                      <TableCell>{booking.courtNumber ?? `Court #${booking.courtId}`}</TableCell>
                       <TableCell>{booking.playerDate}</TableCell>
                       <TableCell className="whitespace-nowrap">
                         {formatHour(booking.startHour)} – {formatHour(booking.endHour)}
