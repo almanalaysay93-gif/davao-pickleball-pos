@@ -10,7 +10,7 @@ import {
   createCheckoutSession,
   retrieveCheckoutSession,
 } from "./paymongo";
-import { isDuplicateSlotError, settleBookingPaid } from "./settlement";
+import { rethrowBookingWriteError, settleBookingPaid, withBookingWrite } from "./settlement";
 
 import {
   clearAuthCookies,
@@ -208,7 +208,7 @@ async function createBookingInput(input: BookingInput, trust: BookingTrust): Pro
   // Everything that decides whether this court is free, and the write that
   // acts on that decision, belongs inside one lock. Split apart, two players
   // asking for overlapping hours both read a free court and both get it.
-  await db.withCourtLock(input.courtId, async tx => {
+  await withBookingWrite(input.courtId, "This slot is already booked", async tx => {
     // Release lapsed holds first, so an abandoned checkout does not keep the
     // court off the market. Scoped to this court-day: sweeping the whole table
     // while holding this lock would take row locks on courts this transaction
@@ -228,30 +228,23 @@ async function createBookingInput(input: BookingInput, trust: BookingTrust): Pro
       throw new TRPCError({ code: "CONFLICT", message: "This slot is already booked" });
     }
 
-    try {
-      await db.insertBooking({
-        ...input,
-        contact: input.contact ?? null,
-        // A public caller cannot describe how it paid, because it has not paid yet.
-        paymentMethod: settledAtCounter ? input.paymentMethod! : null,
-        customerAccountId: input.customerAccountId ?? null,
-        reference,
-        dayAmount: String(pricing.dayAmount),
-        nightAmount: String(pricing.nightAmount),
-        totalAmount: String(pricing.total),
-        paymentStatus: settledAtCounter ? "paid" : "pending",
-        expiresAt: settledAtCounter ? null : new Date(Date.now() + PENDING_HOLD_MS),
-      }, tx);
-    } catch (err) {
-      // The lock rules out a competing booking for this court-day, so a
-      // duplicate key here means the unique index caught something the overlap
-      // check did not. Report it as the conflict it is rather than letting a
-      // driver error carrying SQL reach the venue.
-      if (isDuplicateSlotError(err)) {
-        throw new TRPCError({ code: "CONFLICT", message: "This slot is already booked" });
-      }
-      throw err;
-    }
+    await db.insertBooking({
+      ...input,
+      contact: input.contact ?? null,
+      // A public caller cannot describe how it paid, because it has not paid yet.
+      paymentMethod: settledAtCounter ? input.paymentMethod! : null,
+      customerAccountId: input.customerAccountId ?? null,
+      reference,
+      dayAmount: String(pricing.dayAmount),
+      nightAmount: String(pricing.nightAmount),
+      totalAmount: String(pricing.total),
+      paymentStatus: settledAtCounter ? "paid" : "pending",
+      expiresAt: settledAtCounter ? null : new Date(Date.now() + PENDING_HOLD_MS),
+    }, tx);
+    // The lock rules out a competing booking for this court-day, so a
+    // duplicate key here would mean the unique index caught something the
+    // overlap check did not. withBookingWrite reports it as the conflict it is
+    // rather than letting a driver error carrying SQL reach the venue.
   });
 
   return reference;
@@ -648,30 +641,67 @@ export const appRouter = router({
         const booking = await db.getBookingById(id);
         if (!booking) throw new TRPCError({ code: "NOT_FOUND", message: "Booking not found" });
 
-        if (patch.courtId || patch.playerDate || patch.startHour || patch.endHour) {
-          const courtId = patch.courtId ?? booking.courtId;
-          const playerDate = patch.playerDate ?? booking.playerDate;
-          const startHour = patch.startHour ?? booking.startHour;
-          const endHour = patch.endHour ?? booking.endHour;
-          const conflict = await db.findConflictingBooking(booking.venueId, courtId, playerDate, startHour, endHour, id);
-          if (conflict.length > 0) {
-            throw new TRPCError({ code: "CONFLICT", message: "The new slot is already booked" });
-          }
-        }
-
         const tiers = await db.listRateTiersByVenue(booking.venueId);
         const pricing = priceSlot(
           patch.startHour ?? booking.startHour,
           patch.endHour ?? booking.endHour,
           tiers,
         );
-
-        await db.updateBookingStatus(id, {
-          ...patch,
+        const amounts = {
           dayAmount: String(pricing.dayAmount),
           nightAmount: String(pricing.nightAmount),
           totalAmount: String(pricing.total),
+        };
+
+        // Renaming the player or correcting a contact number leaves the
+        // booking on the court-hour it already holds, so there is nothing to
+        // contend over and no reason to take a lock for it.
+        const movesSlot = Boolean(patch.courtId || patch.playerDate || patch.startHour || patch.endHour);
+        if (!movesSlot) {
+          try {
+            await db.updateBookingStatus(id, { ...patch, ...amounts });
+          } catch (err) {
+            rethrowBookingWriteError(err, "The new slot is already booked");
+          }
+          return { success: true, pricing } as const;
+        }
+
+        const courtId = patch.courtId ?? booking.courtId;
+        const playerDate = patch.playerDate ?? booking.playerDate;
+        const startHour = patch.startHour ?? booking.startHour;
+        const endHour = patch.endHour ?? booking.endHour;
+
+        // A move is a booking that happens to already exist, so it needs what
+        // creating one needs. Read the destination, decide, and write inside a
+        // single hold on the court, or a booking created between the check and
+        // the write takes the slot this move just claimed.
+        //
+        // Only the destination court is locked. The court being left behind is
+        // losing a booking, and nothing can go wrong by freeing a slot. Taking
+        // both locks would need an ordering rule to stay deadlock-free, and
+        // would buy nothing for it.
+        await withBookingWrite(courtId, "The new slot is already booked", async tx => {
+          // Same reason as on create: an abandoned checkout whose hold lapsed
+          // still produces a slot key, and would refuse this move for a court
+          // nobody holds any more.
+          await db.expireStaleHolds(new Date(), { courtId, playerDate }, tx);
+
+          const conflict = await db.findConflictingBooking(
+            booking.venueId,
+            courtId,
+            playerDate,
+            startHour,
+            endHour,
+            id,
+            tx,
+          );
+          if (conflict.length > 0) {
+            throw new TRPCError({ code: "CONFLICT", message: "The new slot is already booked" });
+          }
+
+          await db.updateBookingStatus(id, { ...patch, ...amounts }, tx);
         });
+
         return { success: true, pricing } as const;
       }),
 
