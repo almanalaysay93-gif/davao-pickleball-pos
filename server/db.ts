@@ -447,8 +447,19 @@ export async function listAllOwners() {
   return enriched;
 }
 
-/** Bookings the player made (matched by contact or playerName against given text). */
-export async function listPlayerBookings(identifier: string) {
+/**
+ * Bookings a guest can find without an account, by something only they hold.
+ *
+ * The identifier must equal a booking reference or a contact number in full.
+ * It used to be a substring search across contact and playerName, which meant
+ * '09' matched every Philippine mobile number in the table and handed back 200
+ * rows of other people's names, numbers, venues and amounts. A fragment of a
+ * phone number is not a secret. The whole number, and the reference printed on
+ * the receipt, are the two things the person who booked actually has.
+ *
+ * playerName is gone from the match entirely. Names are guessed, not held.
+ */
+export async function listGuestBookings(identifier: string) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
   const term = identifier.trim();
@@ -459,13 +470,29 @@ export async function listPlayerBookings(identifier: string) {
     .where(
       and(
         inArray(bookings.paymentStatus, ["pending", "paid"]),
-        or(
-          like(bookings.contact, `%${term}%`),
-          like(bookings.playerName, `%${term}%`),
-          eq(bookings.reference, term),
-        ),
+        or(eq(bookings.reference, term), eq(bookings.contact, term)),
       ),
     )
+    .orderBy(desc(bookings.createdAt))
+    .limit(50);
+}
+
+/**
+ * Bookings belonging to a signed-in customer account.
+ *
+ * Keyed on customerAccountId, which the create path writes on every booking
+ * made while signed in. The previous version matched the account's email
+ * against contact and playerName, and bookings store a phone number in
+ * contact, so a signed-in player's own list came back empty however many
+ * courts they had booked.
+ */
+export async function listAccountBookings(accountId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return db
+    .select()
+    .from(bookings)
+    .where(eq(bookings.customerAccountId, accountId))
     .orderBy(desc(bookings.createdAt))
     .limit(200);
 }

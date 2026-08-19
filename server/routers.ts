@@ -131,6 +131,14 @@ type BookingTrust = "public" | "counter";
  */
 const PENDING_HOLD_MS = 20 * 60 * 1000;
 
+/** Pair each booking with its venue, in one query rather than one per row. */
+async function attachVenues<T extends { venueId: number }>(rows: T[]) {
+  const venueIds = Array.from(new Set(rows.map(r => r.venueId)));
+  const venueRows = venueIds.length ? await db.listVenuesByIds(venueIds) : [];
+  const venueMap = new Map(venueRows.map((v: { id: number }) => [v.id, v]));
+  return rows.map(r => ({ booking: r, venue: venueMap.get(r.venueId) ?? null }));
+}
+
 /**
  * Settle a booking as paid, refusing the ones that have already let go of
  * their court.
@@ -628,39 +636,55 @@ export const appRouter = router({
       return { booking, venue, court };
     }),
 
-    /** Player: find my bookings by the contact/phone/email I booked with. */
-    myBookings: playerProcedure
-      .input(z.object({ identifier: z.string().min(3).max(128) }))
+    /**
+     * Guest: find the booking I made without an account.
+     *
+     * Public on purpose. Requiring sign-in here protected nothing, because
+     * anyone can register a customer account in a few seconds, and it broke
+     * the flow it guarded: the guest lookup screen is shown only to signed-out
+     * visitors, so every call it made answered 401. What guards the data is
+     * the exact-match rule in listGuestBookings, not the session.
+     *
+     * The minimum length is the width of a booking reference. A full phone
+     * number clears it too; a fragment of one does not.
+     */
+    myBookings: publicProcedure
+      .input(z.object({ identifier: z.string().min(6).max(128) }))
       .query(async ({ input }) => {
-        const rows = await db.listPlayerBookings(input.identifier);
-        const venueIds = Array.from(new Set(rows.map(r => r.venueId)));
-        const venueRows = venueIds.length ? await db.listVenuesByIds(venueIds) : [];
-        const venueMap = new Map(venueRows.map((v: { id: number }) => [v.id, v]));
-        return rows.map(r => ({ booking: r, venue: venueMap.get(r.venueId) ?? null }));
+        const rows = await db.listGuestBookings(input.identifier);
+        return attachVenues(rows);
       }),
 
-    /** Customer account: all bookings made under the signed-in email. */
+    /** Customer account: every booking made while signed in to this account. */
     myAccountBookings: customerAccountProcedure.query(async ({ ctx }) => {
-      const email = ctx.user?.email;
-      if (!email) throw new TRPCError({ code: "UNAUTHORIZED", message: "Not signed in" });
-      const rows = await db.listPlayerBookings(email);
-      const venueIds = Array.from(new Set(rows.map(r => r.venueId)));
-      const venueRows = venueIds.length ? await db.listVenuesByIds(venueIds) : [];
-      const venueMap = new Map(venueRows.map((v: { id: number }) => [v.id, v]));
-      return rows.map(r => ({ booking: r, venue: venueMap.get(r.venueId) ?? null }));
+      const accountId = ctx.user?.id;
+      if (!accountId) throw new TRPCError({ code: "UNAUTHORIZED", message: "Not signed in" });
+      const rows = await db.listAccountBookings(accountId);
+      return attachVenues(rows);
     }),
 
-    /** Player: cancel my own booking (verified via booking id + identifier ownership). */
-    cancelMine: playerProcedure
-      .input(z.object({ id: z.number().int().positive(), identifier: z.string().min(3).max(128) }))
-      .mutation(async ({ input }) => {
+    /** Player: cancel my own booking. */
+    cancelMine: publicProcedure
+      .input(z.object({ id: z.number().int().positive(), identifier: z.string().min(6).max(128) }))
+      .mutation(async ({ input, ctx }) => {
         const booking = await db.getBookingById(input.id);
         if (!booking) throw new TRPCError({ code: "NOT_FOUND", message: "Booking not found" });
         const identifier = input.identifier.trim();
-        const mine =
-          (booking.contact && booking.contact.includes(identifier)) ||
-          booking.playerName.includes(identifier);
-        if (!mine) throw new TRPCError({ code: "FORBIDDEN", message: "This booking is not yours" });
+
+        // Two ways to own a booking: the session it was made in, or a secret
+        // the holder carries. The previous test was contact.includes(identifier),
+        // which passed for '09' against every Philippine mobile number, so any
+        // caller could cancel every booking in the table by walking the id
+        // sequence. Substrings decide nothing here now.
+        const ownedByAccount =
+          ctx.user?.type === "customer" && booking.customerAccountId === ctx.user.id;
+        const ownedBySecret =
+          booking.reference.toLowerCase() === identifier.toLowerCase() ||
+          booking.contact === identifier;
+        if (!ownedByAccount && !ownedBySecret) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "This booking is not yours" });
+        }
+
         await db.updateBookingStatus(input.id, { paymentStatus: "cancelled" });
         return { success: true } as const;
       }),

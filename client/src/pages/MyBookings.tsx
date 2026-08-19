@@ -44,11 +44,15 @@ export default function MyBookings() {
       enabled: isCustomer,
     });
 
-  const searchReady = searched.length >= 3;
+  // Six characters is the server's minimum. A booking reference or a full
+  // phone number clears it; a fragment of one is no longer a lookup key.
+  const searchReady = searched.length >= 6;
   const { data: searchBookings, isLoading: searchLoading, error } =
     trpc.bookings.myBookings.useQuery(
       { identifier: searched },
-      { enabled: !isCustomer && searchReady },
+      // Signed-in players get this box too, for the courts they booked before
+      // making an account. Gating it on !isCustomer left that search dead.
+      { enabled: searchReady },
     );
 
   const bookings = isCustomer ? (accountBookings ?? []) : (searchBookings ?? []);
@@ -79,7 +83,7 @@ export default function MyBookings() {
           <h1 className="mt-4 font-display text-2xl font-semibold">Your bookings</h1>
           <p className="mt-2 text-sm text-muted-foreground">
             Signed-in players see their reservations automatically. Booking as a guest? Search by
-            the phone number or name you booked with.
+            the exact phone number you booked with, or your booking reference.
           </p>
           <div className="mt-6 flex flex-col items-center gap-3">
             <Link href="/customer-login">
@@ -96,17 +100,17 @@ export default function MyBookings() {
               <Input
                 value={query}
                 onChange={e => setQuery(e.target.value)}
-                placeholder="Booking reference, phone, name, or email…"
+                placeholder="Booking reference or full phone number…"
                 className="pl-9"
               />
             </div>
-            <Button onClick={() => setSearched(query)} disabled={query.length < 3}>
+            <Button onClick={() => setSearched(query)} disabled={query.length < 6}>
               Search
             </Button>
           </div>
-          {query.length > 0 && query.length < 3 && (
+          {query.length > 0 && query.length < 6 && (
             <p className="mt-2 text-xs text-muted-foreground">
-              Type at least 3 characters to search.
+              Enter a full booking reference or phone number.
             </p>
           )}
 
@@ -115,7 +119,7 @@ export default function MyBookings() {
               <CardContent className="flex flex-col items-center gap-3 py-10 text-center">
                 <Link2 className="h-8 w-8 text-muted-foreground/60" />
                 <p className="text-sm text-muted-foreground">
-                  Enter your phone number or name to load your reservations.
+                  Enter your full phone number or booking reference to load your reservations.
                 </p>
               </CardContent>
             </Card>
@@ -174,7 +178,7 @@ export default function MyBookings() {
       </h1>
       <p className="mt-2 max-w-xl text-sm text-muted-foreground">
         All reservations made under your account ({user?.email}). Bookings made as a guest can be
-        found with a search by name or phone number.
+        found with a search by booking reference or full phone number.
       </p>
 
       <div className="mt-6 flex gap-2">
@@ -183,11 +187,11 @@ export default function MyBookings() {
           <Input
             value={query}
             onChange={e => setQuery(e.target.value)}
-            placeholder="Guest bookings: phone, name, or email…"
+            placeholder="Guest bookings: reference or full phone number…"
             className="pl-9"
           />
         </div>
-        <Button onClick={() => setSearched(query)} disabled={query.length < 3}>
+        <Button onClick={() => setSearched(query)} disabled={query.length < 6}>
           Search guest bookings
         </Button>
       </div>

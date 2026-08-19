@@ -936,10 +936,131 @@ describe("admin authorization", () => {
   });
 });
 
+describe("booking lookup: who may see whose booking", () => {
+  const day = "2027-11-11";
+  // Two players whose numbers share a prefix, which every Philippine mobile
+  // number does. A substring search on '0917' must not put one in the other's
+  // results.
+  const mine = { name: "Lookup Mine", contact: "09171110001" };
+  const theirs = { name: "Lookup Theirs", contact: "09171110002" };
+  const accountEmail = `lookup-${Date.now()}@example.com`;
+  let accountId = 0;
+  let myRef = "";
+  let theirRef = "";
+  let theirId = 0;
+
+  beforeEach(async () => {
+    const raw = await getDb();
+    if (!raw) throw new Error("Database not available");
+    await raw.delete(bookingsTable).where(eq(bookingsTable.playerDate, day));
+    await raw.delete(customerAccounts).where(eq(customerAccounts.email, accountEmail));
+    await raw.insert(customerAccounts).values({
+      email: accountEmail,
+      name: "Lookup Mine",
+      passwordHash: "not-used-by-these-tests",
+    });
+    const account = await raw
+      .select()
+      .from(customerAccounts)
+      .where(eq(customerAccounts.email, accountEmail));
+    accountId = account[0]!.id;
+
+    const venues = await listVenues();
+    const venue = venues.find(v => v.name === "Arena Athletics")!;
+    const courtRows = await db.listCourtsByVenue(venue.id);
+    const court = courtRows.find(c => c.status === "available")!;
+
+    // Booked while signed in, so the row carries customerAccountId. The
+    // contact is a phone number, not the account email, which is the normal
+    // case and the one the email LIKE-match never finds.
+    const signedIn = appRouter.createCaller(
+      baseCtx({
+        id: accountId,
+        type: "customer",
+        identity: accountEmail,
+        name: "Lookup Mine",
+        email: accountEmail,
+        role: "customer",
+      }),
+    );
+    myRef = (
+      await signedIn.bookings.create({
+        venueId: venue.id,
+        courtId: court.id,
+        playerDate: day,
+        startHour: "08:00",
+        endHour: "09:00",
+        playerName: mine.name,
+        contact: mine.contact,
+        channel: "online",
+      })
+    ).reference;
+
+    theirRef = (
+      await appRouter.createCaller(guestCtx()).bookings.create({
+        venueId: venue.id,
+        courtId: court.id,
+        playerDate: day,
+        startHour: "10:00",
+        endHour: "11:00",
+        playerName: theirs.name,
+        contact: theirs.contact,
+        channel: "online",
+      })
+    ).reference;
+    const theirRow = await db.getBookingByReference(theirRef);
+    theirId = theirRow!.id;
+  });
+
+  afterEach(async () => {
+    const raw = await getDb();
+    if (!raw) return;
+    await raw.delete(bookingsTable).where(eq(bookingsTable.playerDate, day));
+    await raw.delete(customerAccounts).where(eq(customerAccounts.email, accountEmail));
+  });
+
+  it("finds a signed-in customer's bookings by account, not by matching their email", async () => {
+    const caller = appRouter.createCaller(
+      baseCtx({
+        id: accountId,
+        type: "customer",
+        identity: accountEmail,
+        name: "Lookup Mine",
+        email: accountEmail,
+        role: "customer",
+      }),
+    );
+    const rows = await caller.bookings.myAccountBookings();
+    expect(rows.map(r => r.booking.reference)).toContain(myRef);
+    expect(rows.map(r => r.booking.reference)).not.toContain(theirRef);
+  });
+
+  it("refuses to return another player's booking for a partial phone number", async () => {
+    const rows = await appRouter.createCaller(guestCtx()).bookings.myBookings({ identifier: "0917111" });
+    expect(rows.map(r => r.booking.reference)).not.toContain(theirRef);
+    expect(rows.map(r => r.booking.reference)).not.toContain(myRef);
+  });
+
+  it("lets a guest find their own booking by full contact number", async () => {
+    const rows = await appRouter
+      .createCaller(guestCtx())
+      .bookings.myBookings({ identifier: theirs.contact });
+    expect(rows.map(r => r.booking.reference)).toEqual([theirRef]);
+  });
+
+  it("refuses to cancel a booking the caller only partially matched", async () => {
+    const caller = appRouter.createCaller(playerCtx());
+    await expect(caller.bookings.cancelMine({ id: theirId, identifier: "0917111" })).rejects.toThrow(
+      /not yours/i,
+    );
+    const after = await db.getBookingById(theirId);
+    expect(after?.paymentStatus).not.toBe("cancelled");
+  });
+});
+
 describe("dual-role: player & owner routers", () => {
-  it("denies guests from player/owner procedures", async () => {
+  it("denies guests from owner procedures", async () => {
     const caller = appRouter.createCaller(guestCtx());
-    await expect(caller.bookings.myBookings({ identifier: "09123456789" })).rejects.toThrow();
     await expect(caller.owner.myVenues()).rejects.toThrow();
   });
 
@@ -1680,9 +1801,8 @@ describe("payment status in bookings", () => {
     const player = appRouter.createCaller(playerCtx());
     const found = await player.bookings.myBookings({ identifier: "09172222222" });
     expect(found.length).toBe(1);
-    // The player who made the booking cancels it (cancelMine requires a signed-
-    // in caller and verifies ownership by matching the identifier against the
-    // booking's own contact/name).
+    // The player who made the booking cancels it. Ownership is the full
+    // contact number, matched exactly against the booking's own.
     await player.bookings.cancelMine({
       id: row.id,
       identifier: "09172222222",
