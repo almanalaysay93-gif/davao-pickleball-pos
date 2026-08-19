@@ -1056,6 +1056,18 @@ describe("booking lookup: who may see whose booking", () => {
     const after = await db.getBookingById(theirId);
     expect(after?.paymentStatus).not.toBe("cancelled");
   });
+
+  it("still shows a guest their booking after the hold lapsed", async () => {
+    // A player who never finished paying must be told the hold expired. If the
+    // row disappears instead, the booking they started simply vanishes and the
+    // venue takes the phone call.
+    await db.updateBookingStatus(theirId, { paymentStatus: "expired" });
+    const rows = await appRouter
+      .createCaller(guestCtx())
+      .bookings.myBookings({ identifier: theirs.contact });
+    expect(rows.map(r => r.booking.reference)).toEqual([theirRef]);
+    expect(rows[0]!.booking.paymentStatus).toBe("expired");
+  });
 });
 
 describe("dual-role: player & owner routers", () => {

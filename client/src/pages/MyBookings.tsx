@@ -77,7 +77,7 @@ export default function MyBookings() {
 
   if (!isCustomer) {
     return (
-      <section className="container max-w-2xl py-20">
+      <section className="container mx-auto max-w-2xl py-20">
         <div className="rounded-xl border border-border bg-card p-10 text-center shadow-sm">
           <UserRound className="mx-auto h-10 w-10 text-muted-foreground" />
           <h1 className="mt-4 font-display text-2xl font-semibold">Your bookings</h1>
@@ -169,7 +169,7 @@ export default function MyBookings() {
 
   // Signed-in customer: account bookings front and center.
   return (
-    <section className="container max-w-4xl py-10">
+    <section className="container mx-auto max-w-4xl py-10">
       <p className="text-xs font-semibold uppercase tracking-[0.22em] text-primary">
         Player Portal
       </p>
@@ -301,7 +301,12 @@ function BookingList({
               <span className="font-display text-xl font-semibold">
                 {formatPHP(Number(booking.totalAmount))}
               </span>
-              {showCancel && booking.paymentStatus !== "cancelled" && (
+              {/* Only a booking still holding its court can be cancelled. An
+                  expired one already released it, so offering the button would
+                  promise an action with nothing left to undo. */}
+              {showCancel &&
+                booking.paymentStatus !== "cancelled" &&
+                booking.paymentStatus !== "expired" && (
                 <AlertDialog>
                   <AlertDialogTrigger asChild>
                     <Button

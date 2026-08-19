@@ -469,7 +469,11 @@ export async function listGuestBookings(identifier: string) {
     .from(bookings)
     .where(
       and(
-        inArray(bookings.paymentStatus, ["pending", "paid"]),
+        // Expired stays visible, cancelled does not. A player who cancelled
+        // knows why the booking is gone. A player whose hold lapsed does not,
+        // and hiding the row turns 'you did not pay in time' into 'my booking
+        // vanished', which reaches the venue as a phone call.
+        inArray(bookings.paymentStatus, ["pending", "paid", "expired"]),
         or(eq(bookings.reference, term), eq(bookings.contact, term)),
       ),
     )
