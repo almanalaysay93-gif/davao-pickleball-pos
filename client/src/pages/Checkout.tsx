@@ -1,42 +1,36 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { formatHour, formatPHP } from "@shared/rates";
-import { Badge } from "@/components/ui/badge";
-import { BadgeCheck, CreditCard, Landmark, Moon, ReceiptText, Smartphone, Sun } from "lucide-react";
+import { CreditCard, Moon, QrCode, ReceiptText, ShieldCheck, Smartphone, Sun } from "lucide-react";
 import { useState } from "react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { useBooking } from "@/contexts/BookingContext";
 
-const PAYMENT_METHODS = [
-  { value: "cash", label: "Cash", icon: Landmark },
-  { value: "gcash", label: "GCash", icon: Smartphone },
-  { value: "card", label: "Card", icon: CreditCard },
+/**
+ * What the player may pay with. This list is a description of PayMongo's
+ * hosted page, not a choice made here: the method is picked there, because the
+ * fee passed on to the payer depends on it and only PayMongo can work it out.
+ */
+const ACCEPTED_METHODS = [
+  { label: "GCash", icon: Smartphone },
+  { label: "QR Ph", icon: QrCode },
+  { label: "Card", icon: CreditCard },
 ];
 
 export default function Checkout() {
   const [, navigate] = useLocation();
   const { draft, setDraft } = useBooking();
-  const [paymentMethod, setPaymentMethod] = useState("cash");
   const [submitting, setSubmitting] = useState(false);
 
-  const createBooking = trpc.bookings.create.useMutation({
-    onSuccess: res => {
-      toast.success("Booking confirmed");
-      navigate(`/confirmation/${res.reference}`);
-    },
-    onError: err => {
-      toast.error(err.message || "Something went wrong");
-    },
-    onSettled: () => setSubmitting(false),
-  });
+  const createBooking = trpc.bookings.create.useMutation();
+  const startCheckout = trpc.payments.startCheckout.useMutation();
 
   if (!draft.venueId || !draft.courtId || !draft.playerDate || !draft.startHour) {
     return (
-      <div className="container py-20 fade-in">
+      <div className="container mx-auto py-20 fade-in">
         <Card className="border-border max-w-md mx-auto">
           <CardContent className="p-8 text-center">
             <ReceiptText className="h-10 w-10 text-muted-foreground mx-auto" />
@@ -53,24 +47,53 @@ export default function Checkout() {
     );
   }
 
-  const submit = (channel: "online" | "walkin") => {
-    setDraft({ channel });
+  /**
+   * Reserve the court, then hand the player to PayMongo.
+   *
+   * The booking is created first and on purpose. It is what holds the court
+   * while they pay, and it is what PayMongo's metadata points back at. If the
+   * gateway then refuses, the reservation still stands and the confirmation
+   * page offers the payment again, so a failure here costs the player a click
+   * rather than their slot.
+   */
+  const payNow = async () => {
+    setDraft({ channel: "online" });
     setSubmitting(true);
-    createBooking.mutate({
-      venueId: draft.venueId!,
-      courtId: draft.courtId!,
-      playerDate: draft.playerDate!,
-      startHour: draft.startHour!,
-      endHour: draft.endHour!,
-      playerName: draft.playerName!,
-      contact: draft.contact ?? undefined,
-      channel,
-      paymentMethod,
-    });
+    let reference: string;
+    try {
+      const res = await createBooking.mutateAsync({
+        venueId: draft.venueId!,
+        courtId: draft.courtId!,
+        playerDate: draft.playerDate!,
+        startHour: draft.startHour!,
+        endHour: draft.endHour!,
+        playerName: draft.playerName!,
+        contact: draft.contact ?? undefined,
+        channel: "online",
+      });
+      reference = res.reference;
+    } catch (err) {
+      toast.error((err as Error).message || "Could not reserve the court");
+      setSubmitting(false);
+      return;
+    }
+
+    try {
+      const { checkoutUrl } = await startCheckout.mutateAsync({ reference });
+      // A full page navigation, not a router push. The payment page belongs to
+      // PayMongo and the player has to see its address to trust it.
+      window.location.href = checkoutUrl;
+    } catch (err) {
+      toast.error(
+        `${(err as Error).message || "Could not open the payment page"}. Your court is held; you can pay from the receipt.`,
+      );
+      setSubmitting(false);
+      navigate(`/confirmation/${reference}`);
+    }
   };
 
   return (
-    <div className="container py-10 md:py-14 fade-in">
+    <div className="container mx-auto py-10 md:py-14 fade-in">
       <div className="max-w-2xl">
         <p className="text-xs font-semibold uppercase tracking-[0.22em] text-accent">Checkout</p>
         <h1 className="mt-3 text-3xl md:text-4xl font-semibold text-balance">
@@ -79,60 +102,32 @@ export default function Checkout() {
       </div>
 
       <div className="mt-8 grid gap-6 lg:grid-cols-[1fr_400px] items-start">
-        {/* Payment & channel */}
         <div className="space-y-5">
           <Card className="border-border bg-card">
             <CardContent className="p-6">
-              <h3 className="font-display text-lg font-semibold">Payment method</h3>
+              <h3 className="font-display text-lg font-semibold">Pay online</h3>
               <p className="mt-1 text-sm text-muted-foreground">
-                Choose how this booking will be paid. Online bookings are confirmed on payment.
+                You will finish on PayMongo's secure page and come straight back here. Choose your
+                payment method there.
               </p>
-              <RadioGroup
-                value={paymentMethod}
-                onValueChange={setPaymentMethod}
-                className="mt-4 grid sm:grid-cols-3 gap-3">
-                {PAYMENT_METHODS.map(m => (
-                  <label
-                    key={m.value}
-                    className={`flex items-center gap-2.5 rounded-lg border p-3.5 cursor-pointer transition-all duration-150 press ${
-                      paymentMethod === m.value
-                        ? "border-primary bg-secondary/70 shadow-sm"
-                        : "border-border hover:border-primary/40"
-                    }`}>
-                    <RadioGroupItem value={m.value} className="sr-only" />
+              <div className="mt-4 grid sm:grid-cols-3 gap-3">
+                {ACCEPTED_METHODS.map(m => (
+                  <div
+                    key={m.label}
+                    className="flex items-center gap-2.5 rounded-lg border border-border p-3.5">
                     <m.icon className="h-4.5 w-4.5 text-accent" />
                     <span className="text-sm font-medium">{m.label}</span>
-                    {paymentMethod === m.value && (
-                      <BadgeCheck className="h-4 w-4 text-primary ml-auto" />
-                    )}
-                  </label>
+                  </div>
                 ))}
-              </RadioGroup>
-            </CardContent>
-          </Card>
-
-          <Card className="border-border bg-card">
-            <CardContent className="p-6">
-              <h3 className="font-display text-lg font-semibold">Booking channel</h3>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Walk-in transactions are paid immediately at the front desk. Online bookings
-                reserve the slot pending payment.
-              </p>
-              <div className="mt-4 flex gap-3">
-                <Button
-                  className="press flex-1"
-                  onClick={() => submit("online")}
-                  disabled={submitting}>
-                  {submitting ? "Confirming…" : "Confirm online booking"}
-                </Button>
-                <Button
-                  variant="secondary"
-                  className="press flex-1"
-                  onClick={() => submit("walkin")}
-                  disabled={submitting}>
-                  {submitting ? "Processing…" : "Walk-in payment"}
-                </Button>
               </div>
+              <p className="mt-4 flex items-start gap-2 text-xs text-muted-foreground">
+                <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-success" />
+                Your court is held for 20 minutes from now. A small payment fee is added on
+                PayMongo's page, and the exact amount depends on the method you pick.
+              </p>
+              <Button className="press mt-5 w-full" onClick={payNow} disabled={submitting}>
+                {submitting ? "Opening secure payment…" : "Pay now"}
+              </Button>
             </CardContent>
           </Card>
         </div>
@@ -180,16 +175,12 @@ export default function Checkout() {
                 </div>
               )}
               <div className="flex items-center justify-between pt-2 border-t border-border">
-                <Label className="text-base font-semibold">Total</Label>
+                <Label className="text-base font-semibold">Court total</Label>
                 <span className="text-2xl font-bold text-primary">
                   {formatPHP(draft.total ?? 0)}
                 </span>
               </div>
             </div>
-
-            <Badge variant="outline" className="mt-4 w-full justify-center py-1.5">
-              Payment: {PAYMENT_METHODS.find(m => m.value === paymentMethod)?.label}
-            </Badge>
           </CardContent>
         </Card>
       </div>

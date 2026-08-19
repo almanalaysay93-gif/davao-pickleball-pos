@@ -138,6 +138,50 @@ describe("paymongo gateway", () => {
     expect(session.status).toBe("active");
   });
 
+  it("reads a settled payment out of the retrieved session", async () => {
+    // The create response carries none of this. Only v1 retrieve returns the
+    // payments array, and an empty one is the normal state until the payer
+    // actually pays, so 'no payments' must read as unpaid rather than unknown.
+    stubFetch(200, {
+      data: {
+        id: "cs_paid",
+        attributes: {
+          checkout_url: "https://checkout.paymongo.com/cs_paid",
+          status: "active",
+          reference_number: "DV-PB-A1B2",
+          payments: [
+            { id: "pay_1", attributes: { status: "paid", source: { type: "gcash" }, amount: 30670 } },
+          ],
+        },
+      },
+    });
+    const session = await retrieveCheckoutSession("cs_paid");
+    expect(session.paid).toBe(true);
+    expect(session.paidMethod).toBe("gcash");
+  });
+
+  it("treats a session with no payments as unpaid", async () => {
+    stubFetch(200, sessionReply("cs_open"));
+    const session = await retrieveCheckoutSession("cs_open");
+    expect(session.paid).toBe(false);
+    expect(session.paidMethod).toBeUndefined();
+  });
+
+  it("treats a failed payment attempt as unpaid", async () => {
+    stubFetch(200, {
+      data: {
+        id: "cs_failed",
+        attributes: {
+          checkout_url: "",
+          status: "active",
+          payments: [{ id: "pay_x", attributes: { status: "failed", source: { type: "card" } } }],
+        },
+      },
+    });
+    const session = await retrieveCheckoutSession("cs_failed");
+    expect(session.paid).toBe(false);
+  });
+
   it("expires a session on v1, cancelling the payment intent behind it", async () => {
     stubFetch(200, sessionReply("cs_expire"));
     await expireCheckoutSession("cs_expire");

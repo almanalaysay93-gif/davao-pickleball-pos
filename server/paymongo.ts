@@ -40,6 +40,12 @@ export type CheckoutSession = {
   checkoutUrl: string;
   status?: string;
   referenceNumber?: string;
+  /** Whether a payment on this session has settled. Only v1 retrieve knows. */
+  paid: boolean;
+  /** How they paid, once they have. PayMongo names it under the payment's source. */
+  paidMethod?: string;
+  /** Whatever was attached at create time. The webhook finds the booking with it. */
+  metadata?: Record<string, string>;
 };
 
 /**
@@ -107,17 +113,38 @@ async function call(url: string, init: RequestInit): Promise<PayMongoResponse> {
   return { ok: res.ok, status: res.status, payload };
 }
 
-/** Unwrap PayMongo's `data.attributes` envelope, which both versions use. */
+type PaymentEntry = {
+  attributes?: { status?: string; source?: { type?: string } };
+};
+
+/**
+ * Unwrap PayMongo's `data.attributes` envelope, which both versions use.
+ *
+ * The create response carries only checkout_url and timestamps, so everything
+ * about payment state comes back empty there. That is correct rather than a
+ * gap: a session cannot be paid at the moment it is opened.
+ */
 function toSession(payload: unknown): CheckoutSession {
   const data = (payload as { data?: { id?: string; attributes?: Record<string, unknown> } } | null)
     ?.data;
   const attributes = data?.attributes ?? {};
   if (!data?.id) throw new Error("PayMongo returned a checkout session with no id");
+
+  // A session can hold several attempts. Only a settled one counts, and an
+  // empty array is the ordinary state before the payer has done anything.
+  const payments = Array.isArray(attributes.payments)
+    ? (attributes.payments as PaymentEntry[])
+    : [];
+  const settled = payments.find(p => p.attributes?.status === "paid");
+
   return {
     id: data.id,
     checkoutUrl: String(attributes.checkout_url ?? ""),
     status: attributes.status as string | undefined,
     referenceNumber: attributes.reference_number as string | undefined,
+    paid: Boolean(settled),
+    paidMethod: settled?.attributes?.source?.type,
+    metadata: attributes.metadata as Record<string, string> | undefined,
   };
 }
 

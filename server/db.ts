@@ -662,3 +662,28 @@ export async function deleteVenue(venueId: number) {
   await db.delete(venues).where(eq(venues.id, venueId));
   return { success: true } as const;
 }
+
+/**
+ * Record the PayMongo session a booking was sent to, and restart its hold.
+ *
+ * Two writes that belong together. The session id lets the return page and the
+ * sweep find the checkout again, and the fresh deadline gives the player the
+ * whole window on PayMongo's page rather than whatever was left of the window
+ * they spent filling in the booking form. A hold that lapses mid-payment is
+ * money taken for a court somebody else may already hold.
+ *
+ * Kept out of updateBookingStatus deliberately: that function's patch type is
+ * the set of fields staff may change, and neither of these is one of them.
+ */
+export async function attachCheckoutSession(
+  id: number,
+  sessionId: string,
+  expiresAt: Date,
+) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db
+    .update(bookings)
+    .set({ paymongoSessionId: sessionId, expiresAt })
+    .where(eq(bookings.id, id));
+}

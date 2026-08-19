@@ -1,27 +1,73 @@
 import { Button } from "@/components/ui/button";
 import { formatHour, formatPHP } from "@shared/rates";
-import { BadgeCheck, CalendarDays, CircleAlert, CircleDollarSign, Clock, MapPin, Printer } from "lucide-react";
+import { BadgeCheck, CalendarDays, CircleAlert, CircleDollarSign, Clock, CreditCard, Hourglass, MapPin, Printer } from "lucide-react";
 import { Link, useRoute } from "wouter";
+import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { PlayerStatusBadge } from "@/components/BookingStatus";
 import { useBooking } from "@/contexts/BookingContext";
 import { VenueLocation } from "@/components/VenueLocation";
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export default function Confirmation() {
   const [, params] = useRoute("/confirmation/:reference");
   const reference = params?.reference ?? "";
   const { resetDraft } = useBooking();
 
-  const { data, isLoading, error } = trpc.bookings.get.useQuery(
+  const { data, isLoading, error, refetch } = trpc.bookings.get.useQuery(
     { reference },
     { enabled: Boolean(reference), refetchOnWindowFocus: false },
   );
 
-  // Only 'paid' and 'pending' still hold the court. While the booking is
-  // loading there is nothing to warn about yet, so the page stays optimistic.
+  /**
+   * This page is also where PayMongo returns the player, so it has to answer
+   * "did my payment go through" without believing the browser that asks.
+   *
+   * sync makes the server retrieve the session from PayMongo and settle from
+   * what the gateway says. The webhook is the reliable path and normally wins
+   * the race; this covers the player who gets back first, and the day the
+   * webhook does not arrive at all.
+   */
+  const sync = trpc.payments.sync.useMutation();
+  const synced = useRef<string | null>(null);
+  useEffect(() => {
+    if (!data || data.booking.paymentStatus !== "pending") return;
+    if (!data.booking.paymongoSessionId) return;
+    if (synced.current === reference) return;
+    synced.current = reference;
+    sync.mutateAsync({ reference }).then(
+      res => {
+        if (res.paymentStatus === "paid") refetch();
+      },
+      () => {
+        // A gateway that will not answer is not the player's problem to solve
+        // on this screen. The receipt still shows the real, unpaid state and
+        // the pay button below is still there.
+      },
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data?.booking.id, data?.booking.paymentStatus]);
+
+  const [paying, setPaying] = useState(false);
+  const startCheckout = trpc.payments.startCheckout.useMutation();
+  const payNow = async () => {
+    setPaying(true);
+    try {
+      const { checkoutUrl } = await startCheckout.mutateAsync({ reference });
+      window.location.href = checkoutUrl;
+    } catch (err) {
+      toast.error((err as Error).message || "Could not open the payment page");
+      setPaying(false);
+    }
+  };
+
+  // Three states, not two. A pending booking holds its court but nobody has
+  // paid for it, and the player who abandoned PayMongo's page lands right
+  // here. Telling them the reservation is secured sends them to the venue with
+  // a receipt the venue will not honour.
   const status = data?.booking.paymentStatus;
   const holdsCourt = status === undefined || status === "paid" || status === "pending";
+  const awaitingPayment = status === "pending";
 
   // Clear the booking draft once confirmed — the transaction is done.
   useEffect(() => {
@@ -31,7 +77,7 @@ export default function Confirmation() {
 
   if (error) {
     return (
-      <div className="container py-20 text-center fade-in">
+      <div className="container mx-auto py-20 text-center fade-in">
         <p className="text-muted-foreground">Booking not found: {reference}</p>
         <Link href="/">
           <Button className="mt-4 press">Return home</Button>
@@ -41,7 +87,7 @@ export default function Confirmation() {
   }
 
   return (
-    <div className="container py-12 md:py-16 fade-in">
+    <div className="container mx-auto py-12 md:py-16 fade-in">
       <div className="max-w-md mx-auto">
         {/* Wording follows the status. A booking whose hold lapsed no longer
             holds its court, and telling the player it is secured sends them to
@@ -49,21 +95,29 @@ export default function Confirmation() {
         <div className="text-center">
           <span
             className={`mx-auto flex h-16 w-16 items-center justify-center rounded-full ${
-              holdsCourt ? "bg-success/15" : "bg-destructive/10"
+              !holdsCourt ? "bg-destructive/10" : awaitingPayment ? "bg-warning/15" : "bg-success/15"
             }`}>
-            {holdsCourt ? (
-              <BadgeCheck className="h-9 w-9 text-success" />
-            ) : (
+            {!holdsCourt ? (
               <CircleAlert className="h-9 w-9 text-destructive" />
+            ) : awaitingPayment ? (
+              <Hourglass className="h-9 w-9 text-warning" />
+            ) : (
+              <BadgeCheck className="h-9 w-9 text-success" />
             )}
           </span>
           <h1 className="mt-5 font-display text-3xl font-semibold text-balance">
-            {holdsCourt ? "Booking confirmed" : "This booking is no longer held"}
+            {!holdsCourt
+              ? "This booking is no longer held"
+              : awaitingPayment
+                ? "Your court is held, awaiting payment"
+                : "Booking confirmed"}
           </h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            {holdsCourt
-              ? "Your reservation is secured. Present this receipt at the venue."
-              : "The court has been released and this receipt is not valid for entry. Book again to reserve a slot."}
+            {!holdsCourt
+              ? "The court has been released and this receipt is not valid for entry. Book again to reserve a slot."
+              : awaitingPayment
+                ? "Nobody has paid for this slot yet. Complete payment to secure it, or the court is released."
+                : "Your reservation is secured. Present this receipt at the venue."}
           </p>
         </div>
 
@@ -109,7 +163,12 @@ export default function Confirmation() {
                   </div>
                 )}
                 <div className="flex justify-between pt-2 border-t border-border">
-                  <span className="font-semibold">Amount paid</span>
+                  {/* The player lands here straight off PayMongo, often still
+                      unpaid. Calling an unpaid total 'Amount paid' tells them
+                      the venue has their money when it does not. */}
+                  <span className="font-semibold">
+                    {data.booking.paymentStatus === "paid" ? "Amount paid" : "Amount due"}
+                  </span>
                   <span className="text-lg font-bold text-primary">
                     {formatPHP(Number(data.booking.totalAmount))}
                   </span>
@@ -123,7 +182,24 @@ export default function Confirmation() {
               </div>
             </div>
 
-            <div className="px-6 pb-6 flex gap-2">
+            {data.booking.paymentStatus === "pending" && (
+              <div className="px-6 pb-1">
+                <Button className="press w-full" onClick={payNow} disabled={paying || sync.isPending}>
+                  <CreditCard className="mr-1.5 h-4 w-4" />
+                  {sync.isPending
+                    ? "Checking your payment…"
+                    : paying
+                      ? "Opening secure payment…"
+                      : "Pay now"}
+                </Button>
+                <p className="mt-2 text-center text-xs text-muted-foreground">
+                  This court is held for a short time only. It is released if payment does not
+                  arrive.
+                </p>
+              </div>
+            )}
+
+            <div className="px-6 pb-6 pt-5 flex gap-2">
               <Button
                 variant="outline"
                 className="press flex-1 bg-transparent"

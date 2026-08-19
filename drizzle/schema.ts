@@ -87,6 +87,14 @@ export const bookings = mysqlTable("bookings", {
   // venue's abandonment numbers depend on the two staying apart.
   paymentStatus: mysqlEnum("paymentStatus", ["pending", "paid", "cancelled", "expired"]).default("pending").notNull(),
   paymentMethod: varchar("paymentMethod", { length: 32 }), // cash, gcash, card
+  /**
+   * The PayMongo checkout session opened for this booking, if any.
+   *
+   * Kept so the return page can ask PayMongo what happened when the webhook
+   * has not arrived yet, and so the hold sweep can cancel the session it
+   * belongs to instead of leaving a payable page pointing at a released court.
+   */
+  paymongoSessionId: varchar("paymongoSessionId", { length: 64 }),
   dayAmount: decimal("dayAmount", { precision: 10, scale: 2 }).default("0"),
   nightAmount: decimal("nightAmount", { precision: 10, scale: 2 }).default("0"),
   totalAmount: decimal("totalAmount", { precision: 10, scale: 2 }).notNull(),
