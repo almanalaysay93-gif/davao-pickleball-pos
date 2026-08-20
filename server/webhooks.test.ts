@@ -1,13 +1,11 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import express from "express";
 import http from "node:http";
-import { eq } from "drizzle-orm";
 import { appRouter } from "./routers";
 import { registerPaymongoWebhook } from "./webhooks";
 import type { TrpcContext } from "./_core/context";
-import { bookings as bookingsTable } from "../drizzle/schema";
 import * as db from "./db";
-import { getDb, listVenues } from "./db";
+import { listVenues } from "./db";
 
 const day = "2027-11-14";
 /**
@@ -132,11 +130,7 @@ async function makePendingBooking(hour: string, name: string) {
     channel: "online",
   });
   const row = (await db.getBookingByReference(res.reference))!;
-  const raw = await getDb();
-  await raw!
-    .update(bookingsTable)
-    .set({ paymongoSessionId: "cs_hook" })
-    .where(eq(bookingsTable.id, row.id));
+  await db.updateBookingStatus(row.id, { paymongoSessionId: "cs_hook" });
   return row;
 }
 
@@ -165,15 +159,13 @@ async function signed(body: string, mode: "te" | "li" = "te") {
 beforeEach(async () => {
   vi.stubEnv("PAYMONGO_SECRET_KEY", KEY);
   vi.stubEnv("PAYMONGO_WEBHOOK_SECRET", SECRET);
-  const raw = await getDb();
-  if (raw) await raw.delete(bookingsTable).where(eq(bookingsTable.playerDate, day));
+  await db.deleteBookingsByDate(day);
 });
 
 afterEach(async () => {
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
-  const raw = await getDb();
-  if (raw) await raw.delete(bookingsTable).where(eq(bookingsTable.playerDate, day));
+  await db.deleteBookingsByDate(day);
 });
 
 describe("PayMongo webhook signature", () => {

@@ -1,10 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { and, eq } from "drizzle-orm";
 import { appRouter } from "./routers";
 import type { TrpcContext } from "./_core/context";
-import { bookings as bookingsTable } from "../drizzle/schema";
 import * as db from "./db";
-import { getDb, listVenues } from "./db";
+import { listVenues } from "./db";
 
 const day = "2027-10-08";
 const KEY = "sk_test_payments_unit";
@@ -64,15 +62,13 @@ async function makePendingBooking(hour: string, name: string) {
 
 beforeEach(async () => {
   vi.stubEnv("PAYMONGO_SECRET_KEY", KEY);
-  const raw = await getDb();
-  if (raw) await raw.delete(bookingsTable).where(eq(bookingsTable.playerDate, day));
+  await db.deleteBookingsByDate(day);
 });
 
 afterEach(async () => {
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
-  const raw = await getDb();
-  if (raw) await raw.delete(bookingsTable).where(eq(bookingsTable.playerDate, day));
+  await db.deleteBookingsByDate(day);
 });
 
 describe("payments.startCheckout", () => {
@@ -130,9 +126,8 @@ describe("payments.startCheckout", () => {
 
   it("restarts the hold clock, so the player gets the full window to pay", async () => {
     const booking = await makePendingBooking("12:00", "Pay Echo");
-    const raw = await getDb();
     const past = new Date(Date.now() + 60_000);
-    await raw!.update(bookingsTable).set({ expiresAt: past }).where(eq(bookingsTable.id, booking.id));
+    await db.updateBookingStatus(booking.id, { expiresAt: past.toISOString() });
     stubPayMongo(openSession);
 
     await appRouter.createCaller(guestCtx()).payments.startCheckout({ reference: booking.reference });
