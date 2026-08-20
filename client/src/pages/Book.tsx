@@ -85,6 +85,18 @@ export default function Book() {
 
   const venue = venues?.find(v => v.id === venueId);
 
+  /**
+   * Whether the quote for the current selection is still on the wire.
+   *
+   * submit() freezes the quote into the draft, so a click that lands first
+   * used to freeze it at zero and checkout then read "Total ₱0.00" for a
+   * booking the server priced at the real amount. Gating the click is the
+   * cheapest place to make that impossible: the snapshot is only ever taken
+   * here. An errored quote deliberately leaves the button live, so submit()
+   * can say why nothing happened instead of the button sitting dead.
+   */
+  const priceInFlight = Boolean(venueId && startHour && endHour) && !quote.data && !quote.isError;
+
   // Hooks must run on every render — compute before any early return.
   const startOptions = useMemo(() => {
     if (!availability.data || startHour === null) return availability.data?.slots ?? [];
@@ -133,6 +145,10 @@ export default function Book() {
       toast.error("Please complete the venue, court, date, and time selection");
       return;
     }
+    if (!quote.data) {
+      toast.error("Still working out the price for this slot. Please try again in a moment.");
+      return;
+    }
     const court = courts.data?.find(c => c.id === courtId);
     setDraft({
       venueId,
@@ -145,9 +161,9 @@ export default function Book() {
       playerName: playerName.trim(),
       contact: contact.trim() || null,
       playerEmail: playerEmail.trim() || null,
-      dayAmount: quote.data?.dayAmount ?? 0,
-      nightAmount: quote.data?.nightAmount ?? 0,
-      total: quote.data?.total ?? 0,
+      dayAmount: quote.data.dayAmount,
+      nightAmount: quote.data.nightAmount,
+      total: quote.data.total,
     });
     navigate("/checkout");
   };
@@ -373,8 +389,18 @@ export default function Book() {
                 Daytime and nighttime rates applied per hour. Final amount confirmed at checkout.
               </p>
             </div>
-            <Button className="w-full mt-5 press" size="lg" onClick={submit}>
-              Continue to checkout
+            <Button
+              className="w-full mt-5 press"
+              size="lg"
+              onClick={submit}
+              disabled={priceInFlight}>
+              {priceInFlight ? (
+                <>
+                  <Clock className="h-4 w-4 animate-spin" /> Pricing your slot…
+                </>
+              ) : (
+                "Continue to checkout"
+              )}
             </Button>
           </CardContent>
         </Card>

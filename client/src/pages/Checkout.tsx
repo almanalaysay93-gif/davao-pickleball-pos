@@ -173,6 +173,8 @@ export default function Checkout() {
     }
   }, [promoLookup.data?.id, appliedPromo]);
 
+  const hasRateBreakdown = (draft.dayAmount ?? 0) > 0 || (draft.nightAmount ?? 0) > 0;
+
   return (
     <div className="container py-10 md:py-14 fade-in">
       <div className="max-w-2xl">
@@ -269,9 +271,14 @@ export default function Checkout() {
             </dl>
 
             <div className="mt-5 pt-4 border-t border-border space-y-2.5">
-              <h4 className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                Rate breakdown
-              </h4>
+              {/* The heading labels the two rate rows, so it follows them out
+                  rather than standing over an empty gap. Every other heading in
+                  this card has content underneath it unconditionally. */}
+              {hasRateBreakdown && (
+                <h4 className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                  Rate breakdown
+                </h4>
+              )}
               {(draft.dayAmount ?? 0) > 0 && (
                 <div className="flex items-center justify-between text-sm">
                   <span className="flex items-center gap-2 text-muted-foreground">

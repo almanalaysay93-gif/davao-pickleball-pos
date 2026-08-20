@@ -34,13 +34,17 @@ async function chooseOption(page: Page, index: number, optionName: string): Prom
 }
 
 /**
- * Fill the booking form and land on /checkout.
+ * Fill every field on /book and stop short of the checkout button.
+ *
+ * Split out of fillBookingForm because the price race is only observable in
+ * the window between the last selection and the click, so a test that drives
+ * that window has to own the click itself.
  *
  * The select indexes are asserted against their placeholder text first. If the
  * form ever gains or reorders a field, the failure names the field rather than
  * silently choosing the wrong one.
  */
-export async function fillBookingForm(page: Page, choice: BookingChoice): Promise<void> {
+export async function fillBookingFields(page: Page, choice: BookingChoice): Promise<void> {
   await page.goto("/book");
 
   const venueTrigger = page.getByRole("combobox").nth(SELECT.venue);
@@ -60,8 +64,24 @@ export async function fillBookingForm(page: Page, choice: BookingChoice): Promis
   const slotTrigger = page.getByRole("combobox").nth(SELECT.startTime);
   await expect(slotTrigger).toContainText("Pick a slot");
   await chooseOption(page, SELECT.startTime, hourLabel(choice.startHour));
+}
 
-  await page.getByRole("button", { name: "Continue to checkout" }).click();
+/** Fill the booking form and land on /checkout. */
+export async function fillBookingForm(page: Page, choice: BookingChoice): Promise<void> {
+  await fillBookingFields(page, choice);
+  await continueToCheckout(page);
+}
+
+/**
+ * Click through to /checkout.
+ *
+ * The button relabels itself while the quote is in flight, so the name matches
+ * both states and Playwright's actionability wait does the waiting. A test
+ * that matched only the idle label would silently wait for the price instead
+ * of clicking during the race.
+ */
+export async function continueToCheckout(page: Page): Promise<void> {
+  await page.getByRole("button", { name: /Continue to checkout|Pricing/ }).click();
   await page.waitForURL("**/checkout");
   await expect(page.getByRole("heading", { name: "Confirm your booking" })).toBeVisible();
 }

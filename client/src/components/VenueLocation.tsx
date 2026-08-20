@@ -80,20 +80,26 @@ export function VenueLocation({ venue, className, withGallery = true }: VenueLoc
 /** The address/name/directions info row — used by both the combined card and the standalone map card. */
 export function VenueLocationInfo({ venue }: { venue: { id?: number; name: string; address: string; district?: string | null } }) {
   return (
-    <div className="mt-3 flex items-start gap-2">
-      <MapPin className="h-3.5 w-3.5 mt-0.5 shrink-0 text-accent" />
-      <div className="min-w-0">
-        <p className="font-display font-semibold flex items-center gap-1.5 flex-wrap">
-          {venue.name}
-          {typeof venue.id === "number" && <VenueRating venueId={venue.id} />}
-        </p>
-        <p className="text-sm text-muted-foreground">{dedupeAddress(venue.address)}</p>
+    // Below sm the link drops to its own line. Sharing the row with the name
+    // left a two-word venue name wrapping into it at 390px, and shortening the
+    // name is not an option the venue owner controls. The link's ml matches
+    // the pin's width plus its gap, so it lines up with the address above it.
+    <div className="mt-3 flex flex-col gap-1.5 sm:flex-row sm:items-start sm:gap-2">
+      <div className="flex min-w-0 items-start gap-2">
+        <MapPin className="h-3.5 w-3.5 mt-0.5 shrink-0 text-accent" />
+        <div className="min-w-0">
+          <p className="font-display font-semibold flex items-center gap-1.5 flex-wrap">
+            {venue.name}
+            {typeof venue.id === "number" && <VenueRating venueId={venue.id} />}
+          </p>
+          <p className="text-sm text-muted-foreground">{dedupeAddress(venue.address)}</p>
+        </div>
       </div>
       <a
         href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(directionsQuery(venue))}`}
         target="_blank"
         rel="noreferrer"
-        className="ml-auto shrink-0 text-[11px] font-semibold uppercase tracking-wide text-accent underline-offset-2 hover:underline">
+        className="ml-[22px] shrink-0 text-[11px] font-semibold uppercase tracking-wide text-accent underline-offset-2 hover:underline sm:ml-auto">
         Get directions
       </a>
     </div>
