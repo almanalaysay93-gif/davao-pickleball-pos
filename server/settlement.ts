@@ -1,5 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import * as db from "./db";
+import { expireCheckoutSession } from "./paymongo";
 
 /**
  * How a booking becomes paid.
@@ -136,4 +137,48 @@ export async function settleBookingPaid(id: number, paymentMethod: string) {
       });
     },
   );
+}
+
+/**
+ * Release the courts held by holds that ran out, and shut the checkout sessions
+ * that were paying for them.
+ *
+ * Expiring the row alone is not enough, and this is the gap the MySQL branch
+ * shipped with. A booking whose hold lapsed stops holding its court, but its
+ * PayMongo session stays payable, so a player who wandered off, left the tab
+ * open, and paid an hour later hands money over for a slot somebody else now
+ * holds. Closing the session at the gateway is what makes the release real.
+ *
+ * Scope this wherever the caller knows the court or venue. Unscoped, it
+ * rewrites every lapsed row in the table, and it sits on the public
+ * availability path.
+ *
+ * A gateway failure is logged, not thrown. The court has already been released
+ * in the database by that point, and refusing to answer an availability query
+ * because PayMongo is slow would take the whole schedule down with it. The log
+ * line names the session so a stuck one can be closed by hand.
+ */
+export async function releaseLapsedHolds(
+  now: Date = new Date(),
+  scope?: { courtId?: number; venueId?: number; playerDate: string },
+): Promise<number> {
+  const expired = await db.expireStaleHolds(now, scope);
+  if (expired.length === 0) return 0;
+
+  await Promise.all(
+    expired
+      .filter(b => b.paymongoSessionId)
+      .map(async b => {
+        try {
+          await expireCheckoutSession(b.paymongoSessionId!);
+        } catch (err) {
+          console.error(
+            `[payments] booking ${b.reference} expired but its PayMongo session ${b.paymongoSessionId} could not be closed. It may still be payable. Close it in the dashboard.`,
+            err,
+          );
+        }
+      }),
+  );
+
+  return expired.length;
 }

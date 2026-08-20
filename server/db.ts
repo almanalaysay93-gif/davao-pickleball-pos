@@ -318,13 +318,15 @@ export async function attachCheckoutSession(
  */
 export async function expireStaleHolds(
   now: Date = new Date(),
-  scope?: { courtId: number; playerDate: string },
+  scope?: { courtId?: number; venueId?: number; playerDate: string },
 ): Promise<BookingRow[]> {
   let query = q("bookings")
     .eq("payment_status", "pending")
     .lt("expires_at", now.toISOString());
   if (scope) {
-    query = query.eq("court_id", scope.courtId).eq("player_date", scope.playerDate);
+    query = query.eq("player_date", scope.playerDate);
+    if (scope.courtId !== undefined) query = query.eq("court_id", scope.courtId);
+    if (scope.venueId !== undefined) query = query.eq("venue_id", scope.venueId);
   }
   const expired = (await query.update({ paymentStatus: "expired" })) as unknown as BookingRow[];
   return expired ?? [];

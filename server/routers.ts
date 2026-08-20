@@ -7,7 +7,7 @@ import { priceSlot, generateSlots } from "@shared/rates";
 import { storageGet, storagePut } from "./storage";
 import { sendBookingConfirmation } from "./resend";
 import { createCheckoutSession, retrieveCheckoutSession } from "./paymongo";
-import { settleBookingPaid } from "./settlement";
+import { releaseLapsedHolds, settleBookingPaid } from "./settlement";
 
 /**
  * How long a booking holds its court while the player pays.
@@ -177,6 +177,13 @@ async function createBookingInput(input: BookingInput): Promise<string> {
   if (!slots.includes(input.startHour)) {
     throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid time slot for this venue" });
   }
+
+  // A hold that lapsed still occupies the unique index until it is marked
+  // expired, so releasing first is what lets the next player take the slot.
+  await releaseLapsedHolds(new Date(), {
+    courtId: input.courtId,
+    playerDate: input.playerDate,
+  });
 
   const conflict = await db.findConflictingBooking(
     input.venueId,
@@ -481,6 +488,15 @@ export const appRouter = router({
       .query(async ({ input }) => {
         const venue = await db.getVenueById(input.venueId);
         if (!venue) throw new TRPCError({ code: "NOT_FOUND", message: "Venue not found" });
+
+        // Lapsed holds are released before the grid is read, so a player never
+        // sees a slot as taken by a booking that stopped paying for it. Scoped
+        // to this venue and date: an unscoped sweep would rewrite every lapsed
+        // row in the table on a public page load.
+        await releaseLapsedHolds(new Date(), {
+          venueId: input.venueId,
+          playerDate: input.playerDate,
+        });
 
         const [courts, tiers, bookingsList] = await Promise.all([
           db.listCourtsByVenue(input.venueId),
