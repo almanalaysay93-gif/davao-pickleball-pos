@@ -246,7 +246,12 @@ async function createBookingInput(input: BookingInput): Promise<string> {
     dayAmount: String(pricing.dayAmount),
     nightAmount: String(pricing.nightAmount),
     totalAmount: String(finalTotal),
-    paymentStatus: input.paymentMethod ? "paid" : "pending",
+    // A walk-in is paid when the front desk says so, because the money is in
+    // the drawer. An online booking is only ever paid by the gateway, through
+    // the webhook or payments.sync. Choosing GCash on the checkout screen
+    // states an intent to pay and nothing more, and treating it as settled
+    // hands out a court for free.
+    paymentStatus: input.channel === "walkin" && input.paymentMethod ? "paid" : "pending",
   });
 
   // Best-effort confirmation email with the promo discount line. Never blocks.

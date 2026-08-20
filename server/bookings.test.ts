@@ -984,7 +984,7 @@ describe("payment status in bookings", () => {
     return db.getBookingByReference(reference);
   }
 
-  it("marks an online booking with a payment method as paid immediately", async () => {
+  it("holds an online gcash booking as pending until the gateway settles it", async () => {
     const caller = appRouter.createCaller(guestCtx());
     const venues = await caller.venues.list();
     const venue = venues[0];
@@ -1002,7 +1002,10 @@ describe("payment status in bookings", () => {
       paymentMethod: "gcash",
     });
     const row = await getBookingByRef(res.reference);
-    expect(row.paymentStatus).toBe("paid");
+    // Choosing GCash is a statement of intent, not a payment. Only the webhook
+    // or payments.sync may write "paid", and until one of them does the court
+    // is held on a pending hold that can lapse.
+    expect(row.paymentStatus).toBe("pending");
     expect(row.paymentMethod).toBe("gcash");
     await dbCleanup(row.id);
   });

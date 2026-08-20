@@ -29,16 +29,8 @@ export default function Checkout() {
     discount: number;
   } | null>(null);
 
-  const createBooking = trpc.bookings.create.useMutation({
-    onSuccess: res => {
-      toast.success("Booking confirmed");
-      navigate(`/confirmation/${res.reference}`);
-    },
-    onError: err => {
-      toast.error(err.message || "Something went wrong");
-    },
-    onSettled: () => setSubmitting(false),
-  });
+  const createBooking = trpc.bookings.create.useMutation();
+  const startCheckout = trpc.payments.startCheckout.useMutation();
 
   if (!draft.venueId || !draft.courtId || !draft.playerDate || !draft.startHour) {
     return (
@@ -59,22 +51,46 @@ export default function Checkout() {
     );
   }
 
-  const submit = (channel: "online" | "walkin") => {
+  const submit = async (channel: "online" | "walkin") => {
     setDraft({ channel });
     setSubmitting(true);
-    createBooking.mutate({
-      venueId: draft.venueId!,
-      courtId: draft.courtId!,
-      playerDate: draft.playerDate!,
-      startHour: draft.startHour!,
-      endHour: draft.endHour!,
-      playerName: draft.playerName!,
-      contact: draft.contact ?? undefined,
-      playerEmail: draft.playerEmail ?? undefined,
-      channel,
-      paymentMethod,
-      promoCodeId: appliedPromo?.codeId ?? null,
-    });
+    // Held outside the try so a gateway failure can still send the player to
+    // the booking that now holds their court, rather than stranding them on a
+    // screen with no reference.
+    let reference: string | undefined;
+    try {
+      const res = await createBooking.mutateAsync({
+        venueId: draft.venueId!,
+        courtId: draft.courtId!,
+        playerDate: draft.playerDate!,
+        startHour: draft.startHour!,
+        endHour: draft.endHour!,
+        playerName: draft.playerName!,
+        contact: draft.contact ?? undefined,
+        playerEmail: draft.playerEmail ?? undefined,
+        channel,
+        paymentMethod,
+        promoCodeId: appliedPromo?.codeId ?? null,
+      });
+      reference = res.reference;
+
+      // Cash changes hands at the front desk and a walk-in is settled there,
+      // so neither has anything to pay through PayMongo.
+      if (channel === "online" && paymentMethod !== "cash") {
+        const { checkoutUrl } = await startCheckout.mutateAsync({ reference });
+        // The hosted page replaces this one, so the button stays disabled
+        // rather than inviting a second booking during the redirect.
+        window.location.href = checkoutUrl;
+        return;
+      }
+
+      toast.success("Booking confirmed");
+      navigate(`/confirmation/${reference}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Something went wrong");
+      setSubmitting(false);
+      if (reference) navigate(`/confirmation/${reference}`);
+    }
   };
 
   // ── Promo code validation ────────────────────────────────────────────────
@@ -206,7 +222,11 @@ export default function Checkout() {
                   className="press flex-1"
                   onClick={() => submit("online")}
                   disabled={submitting}>
-                  {submitting ? "Confirming…" : "Confirm online booking"}
+                  {submitting
+                    ? "Confirming…"
+                    : paymentMethod === "cash"
+                      ? "Confirm online booking"
+                      : "Pay now"}
                 </Button>
                 <Button
                   variant="secondary"

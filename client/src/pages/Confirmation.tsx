@@ -8,7 +8,7 @@ import { usePageMeta } from "@/lib/meta";
 import { useBooking } from "@/contexts/BookingContext";
 import { VenueLocationMap, VenueGalleryHero } from "@/components/VenueLocation";
 import { ReviewForm, VenueReviews } from "@/components/ReviewForm";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 export default function Confirmation() {
@@ -25,6 +25,52 @@ export default function Confirmation() {
     { reference },
     { enabled: Boolean(reference), refetchOnWindowFocus: false },
   );
+
+  // ── Settling the payment ─────────────────────────────────────────────────
+  // PayMongo sends the player back here the moment they finish paying, which
+  // is usually before the webhook lands and occasionally instead of it. Asking
+  // the gateway directly is what closes that window.
+  const utils = trpc.useUtils();
+  const [released, setReleased] = useState(false);
+  const asked = useRef(false);
+  const cancelled =
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("cancelled") === "1";
+
+  const sync = trpc.payments.sync.useMutation({
+    onSuccess: res => {
+      // Money arrived for a court the booking had already released. The server
+      // refuses to force it back to paid, so the player is told the truth and
+      // the venue settles it by hand.
+      if (res.paidButReleased) {
+        setReleased(true);
+        return;
+      }
+      if (res.paymentStatus !== data?.booking.paymentStatus) {
+        utils.bookings.get.invalidate({ reference });
+      }
+    },
+  });
+
+  const startCheckout = trpc.payments.startCheckout.useMutation({
+    onSuccess: res => {
+      window.location.href = res.checkoutUrl;
+    },
+    onError: err => toast.error(err.message || "Could not open the payment page"),
+  });
+
+  useEffect(() => {
+    if (!data || asked.current) return;
+    if (data.booking.paymentStatus !== "pending") return;
+    // Once per arrival. A repeated sync would ask the gateway the same
+    // question and answer it the same way.
+    asked.current = true;
+    sync.mutate({ reference });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data?.booking.paymentStatus]);
+
+  const pending = data?.booking.paymentStatus === "pending";
+  const settling = sync.isPending;
 
   // Clear the booking draft once confirmed — the transaction is done.
   useEffect(() => {
@@ -55,14 +101,27 @@ export default function Confirmation() {
 
       <div className="max-w-md mx-auto">
         <div className="text-center">
-          <span className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-success/15">
-            <BadgeCheck className="h-9 w-9 text-success" />
+          <span
+            className={`mx-auto flex h-16 w-16 items-center justify-center rounded-full ${
+              pending ? "bg-warning/15" : "bg-success/15"
+            }`}>
+            {pending ? (
+              <Clock className="h-9 w-9 text-warning" />
+            ) : (
+              <BadgeCheck className="h-9 w-9 text-success" />
+            )}
           </span>
           <h1 className="mt-5 font-display text-3xl font-semibold text-balance">
-            Booking confirmed
+            {pending ? "Court held, awaiting payment" : "Booking confirmed"}
           </h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            Your reservation is secured. Present this receipt at the venue.
+            {settling
+              ? "Checking with PayMongo…"
+              : pending
+                ? cancelled
+                  ? "You left the payment page. Your court is still held for a short while — pay now to keep it."
+                  : "Your court is held until payment is received. Pay now to confirm it."
+                : "Your reservation is secured. Present this receipt at the venue."}
           </p>
         </div>
 
@@ -136,6 +195,30 @@ export default function Confirmation() {
                 )}
               </div>
             </div>
+
+            {released && (
+              <div className="mx-6 mb-4 rounded-lg border border-destructive/40 bg-destructive/5 p-4 text-sm">
+                <p className="font-semibold text-destructive">Payment received after the hold lapsed</p>
+                <p className="mt-1 text-muted-foreground">
+                  PayMongo confirms your payment, but this court was released before it
+                  arrived and may now be held by somebody else. The venue has been notified
+                  and will refund or rebook you. Quote reference {reference}.
+                </p>
+              </div>
+            )}
+
+            {pending && !released && (
+              <div className="px-6 pb-4">
+                <Button
+                  className="w-full press"
+                  disabled={startCheckout.isPending || settling}
+                  onClick={() => startCheckout.mutate({ reference })}>
+                  {startCheckout.isPending
+                    ? "Opening PayMongo…"
+                    : `Pay ${formatPHP(Number(data.booking.totalAmount))}`}
+                </Button>
+              </div>
+            )}
 
             <div className="px-6 pb-4 flex gap-2">
               <Button
