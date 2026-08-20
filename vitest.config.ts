@@ -14,9 +14,12 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    // Refuse to run against the production Supabase project. See vitest.setup.ts.
+    setupFiles: ["./vitest.setup.ts"],
     include: ["server/**/*.test.ts", "server/**/*.spec.ts"],
-    // Tests share one live database (Supabase); run files sequentially to avoid
-    // cross-file mutation interference.
+    // Tests share one live database (the test Supabase project, enforced in
+    // vitest.setup.ts); run files sequentially to avoid cross-file mutation
+    // interference.
     fileParallelism: false,
   },
 });

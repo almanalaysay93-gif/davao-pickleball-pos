@@ -6,6 +6,36 @@ import * as db from "./db";
 import { priceSlot, generateSlots } from "@shared/rates";
 import { storageGet, storagePut } from "./storage";
 import { sendBookingConfirmation } from "./resend";
+import { createCheckoutSession, retrieveCheckoutSession } from "./paymongo";
+import { settleBookingPaid } from "./settlement";
+
+/**
+ * How long a booking holds its court while the player pays.
+ *
+ * Long enough to finish a GCash flow on a phone with bad signal, short enough
+ * that an abandoned checkout does not park a Saturday evening slot all day.
+ */
+const PENDING_HOLD_MS = 20 * 60 * 1000;
+
+/**
+ * Where PayMongo sends the player back to.
+ *
+ * Prefers APP_BASE_URL because the request host is whatever a proxy put there,
+ * and a wrong value here sends a paying player to somebody else's site. The
+ * throw is deliberate: no return address is better than a guessed one.
+ */
+function baseUrl(req: { protocol?: string; headers?: Record<string, unknown> } | undefined): string {
+  const configured = process.env.APP_BASE_URL?.trim().replace(/\/+$/, "");
+  if (configured) return configured;
+  const host = req?.headers?.host;
+  if (typeof host !== "string" || !host) {
+    throw new TRPCError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: "APP_BASE_URL is not configured, so the payment return address cannot be built.",
+    });
+  }
+  return `${req?.protocol ?? "https"}://${host}`;
+}
 
 /** One-time alphanumeric password generated when a staff member is added. */
 function randomOneTimePassword(): string {
@@ -719,6 +749,108 @@ export const appRouter = router({
   }),
 
   /** Owner portal: manage the venues this owner owns. */
+  payments: router({
+    /**
+     * Open (or reopen) the hosted checkout for a pending booking.
+     *
+     * Public, because the player who just booked as a guest has no session.
+     * The booking reference is the only key, and it is the same secret the
+     * confirmation page already shows them.
+     */
+    startCheckout: publicProcedure
+      .input(z.object({ reference: z.string().min(4).max(32) }))
+      .mutation(async ({ input, ctx }) => {
+        const booking = await db.getBookingByReference(input.reference);
+        if (!booking) throw new TRPCError({ code: "NOT_FOUND", message: "Booking not found" });
+        if (booking.paymentStatus === "paid") {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "This booking is already paid." });
+        }
+        if (booking.paymentStatus !== "pending") {
+          // Taking money for a court this booking no longer holds is the one
+          // outcome a later status change cannot repair, so the gateway is not
+          // called at all.
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `This booking is ${booking.paymentStatus} and has released its court. Book again to pay.`,
+          });
+        }
+
+        const holdUntil = new Date(Date.now() + PENDING_HOLD_MS);
+
+        // A player who clicks pay twice must land back on the session they may
+        // already have paid on. Opening a second one would leave the first
+        // payable and unwatched, and sync only ever knows the newest id.
+        if (booking.paymongoSessionId) {
+          const existing = await retrieveCheckoutSession(booking.paymongoSessionId).catch(() => null);
+          if (existing && existing.status === "active" && existing.checkoutUrl) {
+            await db.attachCheckoutSession(booking.id, existing.id, holdUntil);
+            return { checkoutUrl: existing.checkoutUrl } as const;
+          }
+        }
+
+        const venue = await db.getVenueById(booking.venueId);
+        const base = baseUrl(ctx.req);
+        const session = await createCheckoutSession({
+          booking: {
+            id: booking.id,
+            reference: booking.reference,
+            playerName: booking.playerName,
+            totalAmount: String(booking.totalAmount),
+            venueName: venue?.name ?? "Pickleball court",
+            playerDate: booking.playerDate,
+            startHour: booking.startHour,
+            endHour: booking.endHour,
+          },
+          successUrl: `${base}/confirmation/${booking.reference}`,
+          cancelUrl: `${base}/confirmation/${booking.reference}?cancelled=1`,
+        });
+
+        await db.attachCheckoutSession(booking.id, session.id, holdUntil);
+        return { checkoutUrl: session.checkoutUrl } as const;
+      }),
+
+    /**
+     * Ask PayMongo what happened, and settle the booking if money landed.
+     *
+     * The return page calls this because the webhook may not have arrived yet,
+     * or may never arrive. It is a mutation rather than a query because it
+     * writes, and it is safe to repeat: settleBookingPaid already allows
+     * re-marking a booking that is paid.
+     */
+    sync: publicProcedure
+      .input(z.object({ reference: z.string().min(4).max(32) }))
+      .mutation(async ({ input }) => {
+        const booking = await db.getBookingByReference(input.reference);
+        if (!booking) throw new TRPCError({ code: "NOT_FOUND", message: "Booking not found" });
+
+        // Nothing to reconcile: either it is settled, or no checkout was ever
+        // opened, and calling the gateway would answer a question nobody asked.
+        if (booking.paymentStatus === "paid" || !booking.paymongoSessionId) {
+          return { paymentStatus: booking.paymentStatus, paidButReleased: false } as const;
+        }
+
+        const session = await retrieveCheckoutSession(booking.paymongoSessionId);
+        if (!session.paid) {
+          return { paymentStatus: booking.paymentStatus, paidButReleased: false } as const;
+        }
+
+        if (booking.paymentStatus !== "pending") {
+          // Money arrived for a court this booking already released. Forcing
+          // the row back to paid rebuilds its slot key and collides with
+          // whoever took the court, so the state is reported instead. The
+          // venue refunds or rebooks from here; the app must not pretend the
+          // court is held.
+          console.error(
+            `[payments] booking ${booking.reference} was paid at PayMongo but is ${booking.paymentStatus}. Refund or rebook needed.`,
+          );
+          return { paymentStatus: booking.paymentStatus, paidButReleased: true } as const;
+        }
+
+        await settleBookingPaid(booking.id, session.paidMethod ?? "gcash");
+        return { paymentStatus: "paid", paidButReleased: false } as const;
+      }),
+  }),
+
   owner: router({
     myVenues: ownerProcedure.query(async ({ ctx }) => {
       // Venue-specific owner logins see only their venue; the global owner

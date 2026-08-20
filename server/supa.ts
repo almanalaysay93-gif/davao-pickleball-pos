@@ -54,6 +54,8 @@ const MAPS: Record<string, (row: Row) => Row> = {
     dayAmount: row.day_amount, nightAmount: row.night_amount, totalAmount: row.total_amount,
     promoCodeId: row.promo_code_id ?? null, discountAmount: String(row.discount_amount ?? 0),
     playerEmail: row.player_email ?? null,
+    expiresAt: row.expires_at ?? null,
+    paymongoSessionId: row.paymongo_session_id ?? null,
     createdAt: row.created_at,
   }),
   announcements: row => ({
@@ -147,6 +149,7 @@ const REVERSE: Record<string, Record<string, string>> = {
     startHour: "start_hour", endHour: "end_hour", playerName: "player_name", contact: "contact",
     customerAccountId: "customer_account_id",     channel: "channel", paymentStatus: "payment_status", paymentMethod: "payment_method", dayAmount: "day_amount", nightAmount: "night_amount",
     totalAmount: "total_amount", promoCodeId: "promo_code_id", discountAmount: "discount_amount", seriesId: "series_id", membershipId: "membership_id", seenByOwner: "seen_by_owner",
+    expiresAt: "expires_at", paymongoSessionId: "paymongo_session_id",
   },
   announcements: { venueId: "venue_id", title: "title", message: "message", active: "active", expireAt: "expire_at", photoUrl: "photo_url", kind: "kind", eventDate: "event_date" },
   promoCodes: { venueId: "venue_id", code: "code", discountPct: "discount_pct", discountFlat: "discount_flat", minAmount: "min_amount", maxUses: "max_uses", uses: "uses", active: "active", expiresAt: "expires_at" },

@@ -26,6 +26,10 @@ export interface BookingRow {
   startHour: string; endHour: string; playerName: string; contact: string;
   customerAccountId: number | null; channel: string; paymentStatus: string; paymentMethod: string | null;
   dayAmount: string | number; nightAmount: string | number; totalAmount: string | number; promoCodeId: number | null; discountAmount: string | number; playerEmail: string | null; createdAt: unknown;
+  /** When an unpaid hold stops holding its court. Null once paid. */
+  expiresAt: string | null;
+  /** The PayMongo checkout session this booking is being paid through. */
+  paymongoSessionId: string | null;
 }
 export interface AnnouncementRow {
   id: number; venueId: number; title: string; message: string; active: number;
@@ -233,6 +237,20 @@ export async function getBookingById(id: number): Promise<BookingRow | undefined
   return rows[0] as unknown as BookingRow | undefined;
 }
 
+/**
+ * Find the booking a PayMongo checkout session is paying for.
+ *
+ * The webhook arrives knowing only the session, so this is how a payment finds
+ * its way back to a court. The column is written when the session is created,
+ * before the player ever reaches the hosted page.
+ */
+export async function getBookingByPaymongoSessionId(
+  sessionId: string,
+): Promise<BookingRow | undefined> {
+  const rows = await q("bookings").eq("paymongo_session_id", sessionId).limit(1).exec();
+  return rows[0] as unknown as BookingRow | undefined;
+}
+
 /** Check for conflicting booking on the same court + date + overlapping hours.
  *  Overlap test is done in-memory: we fetch the day's confirmed bookings for
  *  the court and compare hour ranges (superset-safe for the small daily sets). */
@@ -271,6 +289,45 @@ export async function updateBookingStatus(
   patch: Record<string, unknown>,
 ) {
   await q("bookings").eq("id", id).update(patch);
+}
+
+/**
+ * Record which PayMongo session is paying for a booking, and how long the
+ * court stays held while the player pays.
+ *
+ * Written before the player ever reaches the hosted page, because the webhook
+ * arrives knowing only the session id and this is the only way back to a court.
+ */
+export async function attachCheckoutSession(
+  id: number,
+  sessionId: string,
+  expiresAt: Date,
+) {
+  await q("bookings")
+    .eq("id", id)
+    .update({ paymongoSessionId: sessionId, expiresAt: expiresAt.toISOString() });
+}
+
+/**
+ * Release the courts held by holds that ran out.
+ *
+ * Scope this to a court and date wherever the caller already knows them. The
+ * unscoped form rewrites every lapsed row in the table, and it sits on the
+ * public availability path, so an unscoped sweep runs for anybody loading a
+ * schedule page.
+ */
+export async function expireStaleHolds(
+  now: Date = new Date(),
+  scope?: { courtId: number; playerDate: string },
+): Promise<BookingRow[]> {
+  let query = q("bookings")
+    .eq("payment_status", "pending")
+    .lt("expires_at", now.toISOString());
+  if (scope) {
+    query = query.eq("court_id", scope.courtId).eq("player_date", scope.playerDate);
+  }
+  const expired = (await query.update({ paymentStatus: "expired" })) as unknown as BookingRow[];
+  return expired ?? [];
 }
 
 /** Convert "HH:MM" to minutes since midnight (for slot expansion). */
