@@ -16,11 +16,6 @@ export default function Confirmation() {
   const reference = params?.reference ?? "";
   const { resetDraft } = useBooking();
 
-  usePageMeta({
-    title: "Booking Confirmed — Davao Pickleball POS",
-    description: "Your pickleball court reservation in Davao City has been confirmed. See your booking details and directions.",
-  });
-
   const { data, isLoading, error } = trpc.bookings.get.useQuery(
     { reference },
     { enabled: Boolean(reference), refetchOnWindowFocus: false },
@@ -69,8 +64,22 @@ export default function Confirmation() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data?.booking.paymentStatus]);
 
-  const pending = data?.booking.paymentStatus === "pending";
+  const status = data?.booking.paymentStatus;
+  const pending = status === "pending";
+  // Undefined until the booking loads. Treating "not pending" as "paid" is what
+  // put a green tick and "Your reservation is secured" over an unpaid court for
+  // the length of the request.
+  const settled = status !== undefined && status !== "pending";
   const settling = sync.isPending;
+
+  usePageMeta({
+    title: pending
+      ? "Payment Pending — Davao Pickleball POS"
+      : settled
+        ? "Booking Confirmed — Davao Pickleball POS"
+        : "Your Booking — Davao Pickleball POS",
+    description: "Your pickleball court reservation in Davao City. See your booking details and directions.",
+  });
 
   // Clear the booking draft once confirmed — the transaction is done.
   useEffect(() => {
@@ -103,16 +112,16 @@ export default function Confirmation() {
         <div className="text-center">
           <span
             className={`mx-auto flex h-16 w-16 items-center justify-center rounded-full ${
-              pending ? "bg-warning/15" : "bg-success/15"
+              settled ? "bg-success/15" : pending ? "bg-warning/15" : "bg-muted"
             }`}>
-            {pending ? (
-              <Clock className="h-9 w-9 text-warning" />
-            ) : (
+            {settled ? (
               <BadgeCheck className="h-9 w-9 text-success" />
+            ) : (
+              <Clock className={`h-9 w-9 ${pending ? "text-warning" : "text-muted-foreground"}`} />
             )}
           </span>
           <h1 className="mt-5 font-display text-3xl font-semibold text-balance">
-            {pending ? "Court held, awaiting payment" : "Booking confirmed"}
+            {settled ? "Booking confirmed" : pending ? "Court held, awaiting payment" : "Your booking"}
           </h1>
           <p className="mt-2 text-sm text-muted-foreground">
             {settling
@@ -121,7 +130,9 @@ export default function Confirmation() {
                 ? cancelled
                   ? "You left the payment page. Your court is still held for a short while — pay now to keep it."
                   : "Your court is held until payment is received. Pay now to confirm it."
-                : "Your reservation is secured. Present this receipt at the venue."}
+                : settled
+                  ? "Your reservation is secured. Present this receipt at the venue."
+                  : "Fetching your receipt…"}
           </p>
         </div>
 
@@ -174,7 +185,7 @@ export default function Confirmation() {
                   </div>
                 )}
                 <div className="flex justify-between pt-2 border-t border-border">
-                  <span className="font-semibold">Amount paid</span>
+                  <span className="font-semibold">{pending ? "Amount due" : "Amount paid"}</span>
                   <span className="text-lg font-bold text-primary">
                     {formatPHP(Number(data.booking.totalAmount))}
                   </span>

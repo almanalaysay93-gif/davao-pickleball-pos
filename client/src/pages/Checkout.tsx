@@ -84,7 +84,12 @@ export default function Checkout() {
         return;
       }
 
-      toast.success("Booking confirmed");
+      // Only a walk-in is settled at this point. Cash online leaves the court
+      // held and the money still owed, so saying "confirmed" contradicts the
+      // page it lands on.
+      toast.success(
+        channel === "walkin" ? "Booking confirmed" : "Court held — pay at the venue to confirm",
+      );
       navigate(`/confirmation/${reference}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Something went wrong");
