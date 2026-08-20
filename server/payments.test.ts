@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { stubGatewayFetch } from "./testing/gatewayFetch";
 import { appRouter } from "./routers";
 import type { TrpcContext } from "./_core/context";
 import * as db from "./db";
@@ -20,7 +21,7 @@ let calls: { url: string; init: RequestInit }[] = [];
 /** Answer PayMongo calls from a canned session, and record what was sent. */
 function stubPayMongo(session: Record<string, unknown>) {
   calls = [];
-  vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
+  stubGatewayFetch(async (url, init) => {
     calls.push({ url, init });
     return new Response(JSON.stringify({ data: { id: "cs_test", attributes: session } }), {
       status: 200,
@@ -133,7 +134,10 @@ describe("payments.startCheckout", () => {
     await appRouter.createCaller(guestCtx()).payments.startCheckout({ reference: booking.reference });
 
     const after = await db.getBookingById(booking.id);
-    expect(after!.expiresAt!.getTime()).toBeGreaterThan(past.getTime() + 60_000);
+    // PostgREST answers in JSON, so a timestamp arrives as an ISO string. The
+    // drizzle client used to hand back a Date and this assertion still read
+    // like it did.
+    expect(new Date(after!.expiresAt!).getTime()).toBeGreaterThan(past.getTime() + 60_000);
   });
 
   it("reuses a checkout still open rather than opening a second one", async () => {
@@ -145,7 +149,7 @@ describe("payments.startCheckout", () => {
     // already paid on. A second one would sit payable and unwatched, and sync
     // only ever holds the newest id.
     calls = [];
-    vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
+    stubGatewayFetch(async (url, init) => {
       calls.push({ url, init });
       return new Response(
         JSON.stringify({ data: { id: "cs_test", attributes: openSession } }),
@@ -169,7 +173,7 @@ describe("payments.startCheckout", () => {
     await appRouter.createCaller(guestCtx()).payments.startCheckout({ reference: booking.reference });
 
     calls = [];
-    vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
+    stubGatewayFetch(async (url, init) => {
       calls.push({ url, init });
       const retrieving = init.method === "GET";
       return new Response(

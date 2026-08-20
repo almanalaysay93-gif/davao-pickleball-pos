@@ -156,7 +156,10 @@ export async function upsertUser(user: InsertUser): Promise<void> {
   if (!values.lastSignedIn || Object.keys(values).length <= 2) {
     values.lastSignedIn = new Date().toISOString();
   }
-  await q("users").upsert(values);
+  // open_id identifies the user, not id, and the row above never carries one.
+  // Without the target PostgREST falls back to the primary key, inserts, and
+  // hits users_open_id_key on the user's second sign-in.
+  await q("users").upsert(values, { onConflict: "open_id" });
 }
 
 export async function getUserByEmail(email: string): Promise<UserRow | undefined> {

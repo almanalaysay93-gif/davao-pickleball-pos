@@ -231,7 +231,7 @@ describe("bookings.quote", () => {
 
 describe("bookings.create + conflict detection", () => {
   it("creates a booking and rejects a conflicting one", async () => {
-    vi.useFakeTimers({ now: new Date("2026-09-01T12:00:00Z") });
+    vi.useFakeTimers({ now: new Date("2026-09-01T12:00:00Z"), toFake: ["Date"] });
     const day = `2026-12-25`; // isolated future date
     await deleteVenueOwnersAll().catch(() => undefined);
     try {
@@ -288,7 +288,7 @@ describe("bookings.create + conflict detection", () => {
   });
 
   it("rejects bookings on past dates", async () => {
-    vi.useFakeTimers({ now: new Date("2026-09-01T12:00:00Z") });
+    vi.useFakeTimers({ now: new Date("2026-09-01T12:00:00Z"), toFake: ["Date"] });
     try {
       const caller = appRouter.createCaller(guestCtx());
       const venuesList = await caller.venues.list();
@@ -315,7 +315,7 @@ describe("admin authorization", () => {
   const adminInput = { id: 1 };
 
   it("allows admins to call admin procedures (creates then cancels a booking)", async () => {
-    vi.useFakeTimers({ now: new Date("2026-09-01T12:00:00Z") });
+    vi.useFakeTimers({ now: new Date("2026-09-01T12:00:00Z"), toFake: ["Date"] });
     try {
       const adminCaller = appRouter.createCaller(adminCtx());
       const guestCaller = appRouter.createCaller(guestCtx());
@@ -391,7 +391,7 @@ describe("dual-role: player & owner routers", () => {
   it(
     "isolates two owners: each sees only their own venue's bookings",
     async () => {
-      vi.useFakeTimers({ now: new Date("2026-09-01T12:00:00Z") });
+      vi.useFakeTimers({ now: new Date("2026-09-01T12:00:00Z"), toFake: ["Date"] });
     let email1 = "";
     let email2 = "";
     const day = "2026-12-24"; // isolated date (conflict test uses 2026-12-25)
@@ -477,7 +477,7 @@ describe("dual-role: player & owner routers", () => {
   });
 
   it("assigns venue ownership via admin.grantOwnership and scopes owner access", async () => {
-    vi.useFakeTimers({ now: new Date("2026-09-01T12:00:00Z") });
+    vi.useFakeTimers({ now: new Date("2026-09-01T12:00:00Z"), toFake: ["Date"] });
     const email = `owner-test-${Date.now()}@example.com`;
     try {
       // Seed the user record (as if they had signed in once).
@@ -521,7 +521,7 @@ describe("dual-role: player & owner routers", () => {
 
 describe("announcements & owner booking", () => {
   it("owners can create announcements scoped to their venue and players see only active ones", async () => {
-    vi.useFakeTimers({ now: new Date("2026-09-01T12:00:00Z") });
+    vi.useFakeTimers({ now: new Date("2026-09-01T12:00:00Z"), toFake: ["Date"] });
     const email = `announce-test-${Date.now()}@example.com`;
     try {
       await upsertUser({ openId: `test-${email}`, email, role: "user" });
@@ -590,7 +590,7 @@ describe("announcements & owner booking", () => {
   }, 30000);
 
   it("expired announcements are hidden from the public list", async () => {
-    vi.useFakeTimers({ now: new Date("2026-08-01T12:00:00Z") });
+    vi.useFakeTimers({ now: new Date("2026-08-01T12:00:00Z"), toFake: ["Date"] });
     const email = `expiry-test-${Date.now()}@example.com`;
     try {
       await upsertUser({ openId: `test-${email}`, email, role: "user" });
@@ -646,7 +646,7 @@ describe("announcements & owner booking", () => {
   }, 30000);
 
   it("owner.createBooking books at owned venues and rejects non-owned ones", async () => {
-    vi.useFakeTimers({ now: new Date("2026-09-01T12:00:00Z") });
+    vi.useFakeTimers({ now: new Date("2026-09-01T12:00:00Z"), toFake: ["Date"] });
     const email = `owner-book-${Date.now()}@example.com`;
     await deleteVenueOwnersAll().catch(() => undefined);
     try {
@@ -737,7 +737,7 @@ describe(
   "court add/remove",
   () => {
     it("admin can add and remove a court; player and guest cannot", async () => {
-    vi.useFakeTimers({ now: new Date("2026-09-01T12:00:00Z") });
+    vi.useFakeTimers({ now: new Date("2026-09-01T12:00:00Z"), toFake: ["Date"] });
     const email = `court-test-${Date.now()}@example.com`;
     try {
       // Guest and player must be denied.
@@ -780,7 +780,7 @@ describe(
 );
 
   it("owner can add/remove courts at owned venues only", async () => {
-    vi.useFakeTimers({ now: new Date("2026-09-01T12:00:00Z") });
+    vi.useFakeTimers({ now: new Date("2026-09-01T12:00:00Z"), toFake: ["Date"] });
     const email = `owner-court-${Date.now()}@example.com`;
     try {
       await upsertUser({ openId: `test-${email}`, email, role: "user" });
@@ -829,7 +829,7 @@ describe(
 );
 
   it("refuses to remove a court with upcoming bookings", async () => {
-    vi.useFakeTimers({ now: new Date("2026-09-01T12:00:00Z") });
+    vi.useFakeTimers({ now: new Date("2026-09-01T12:00:00Z"), toFake: ["Date"] });
     const email = `bookguard-${Date.now()}@example.com`;
     try {
       await upsertUser({ openId: `test-${email}`, email, role: "user" });
@@ -1112,7 +1112,7 @@ describe("per-venue owner logins", () => {
   });
 
   it("allows a venue-specific owner to manage bookings at their venue only", async () => {
-    vi.useFakeTimers({ now: new Date("2026-09-01T12:00:00Z") });
+    vi.useFakeTimers({ now: new Date("2026-09-01T12:00:00Z"), toFake: ["Date"] });
     const day = "2026-12-20";
     await deleteBookingsByDate(day).catch(() => undefined);
     try {

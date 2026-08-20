@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { stubGatewayFetch } from "./testing/gatewayFetch";
 import express from "express";
 import http from "node:http";
 import { appRouter } from "./routers";
@@ -96,7 +97,7 @@ let calls: string[] = [];
 /** Answer the gateway retrieve the handler makes before it settles anything. */
 function stubPayMongo(session: Record<string, unknown>) {
   calls = [];
-  vi.stubGlobal("fetch", async (url: string) => {
+  stubGatewayFetch(async url => {
     calls.push(url);
     return new Response(JSON.stringify({ data: { id: "cs_hook", attributes: session } }), {
       status: 200,
