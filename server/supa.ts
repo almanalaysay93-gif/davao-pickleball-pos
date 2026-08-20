@@ -7,7 +7,60 @@
  */
 import { createClient } from "@supabase/supabase-js";
 
-const SUPA_URL = process.env.SUPABASE_URL ?? "https://tfwyrbqygbhrkmlapxxu.supabase.co";
+/** The project this app has always shipped against, used when nothing is configured. */
+export const PRODUCTION_URL = "https://tfwyrbqygbhrkmlapxxu.supabase.co";
+
+/**
+ * Validate SUPABASE_URL and return the origin createClient expects.
+ *
+ * Supabase publishes several strings per project and only one of them belongs
+ * here. The Postgres DSN carries a password, and the REST endpoint shown in the
+ * dashboard already ends in /rest/v1, which createClient appends again. Both
+ * were pasted into this variable during setup. Neither failed at boot: they
+ * failed later, as "Invalid path specified in request URL" or a bare 401 from
+ * PostgREST, naming no variable and pointing at the wrong layer.
+ *
+ * A value is checked here, where the error can still say which variable is
+ * wrong and what shape it wants. Errors never echo the value, because the one
+ * malformed value most likely to appear is the one with a password in it.
+ */
+export function resolveSupabaseUrl(raw: string | undefined): string {
+  const value = raw?.trim();
+  if (!value) return PRODUCTION_URL;
+
+  const reject = (problem: string): never => {
+    throw new Error(
+      `SUPABASE_URL is ${problem}. It wants the project's API origin and nothing more, ` +
+        `for example ${PRODUCTION_URL} - no path, no credentials, no port. ` +
+        `The value is not repeated here in case it contains a password.`,
+    );
+  };
+
+  if (/^postgres(ql)?:/i.test(value)) {
+    reject("a Postgres connection string, not an API origin");
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return reject("not a valid URL");
+  }
+
+  if (parsed.protocol !== "https:") reject(`served over ${parsed.protocol.replace(":", "")}, but https is required`);
+  if (parsed.username || parsed.password) reject("carrying embedded credentials");
+  if (parsed.search || parsed.hash) reject("carrying a query string or fragment");
+  // A lone "/" is how the dashboard's copy button hands it over, so it is
+  // normalised rather than refused. Anything deeper is a real mistake: the
+  // /rest/v1 suffix is the one that produced "Invalid path specified".
+  if (parsed.pathname !== "/" && parsed.pathname !== "") {
+    reject(`carrying the path ${parsed.pathname}, which createClient would append to again`);
+  }
+
+  return parsed.origin;
+}
+
+const SUPA_URL = resolveSupabaseUrl(process.env.SUPABASE_URL);
 const SUPA_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
 
 export const supa = createClient(SUPA_URL, SUPA_KEY, {
