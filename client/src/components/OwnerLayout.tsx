@@ -148,9 +148,14 @@ export default function OwnerLayout({ children }: { children: ReactNode }) {
       <main className="flex-1">{children}</main>
 
       <footer className="border-t border-slate-200 bg-white">
-        <div className="container py-6 text-xs text-slate-500 flex flex-col sm:flex-row justify-between gap-1">
+        <div className="container py-6 text-xs text-slate-500 flex flex-col sm:flex-row justify-between items-center gap-2">
           <span>© {new Date().getFullYear()} Davao Pickleball POS — Owner Portal</span>
-          <span>Timezone: Asia/Manila (GMT+8)</span>
+          <div className="flex items-center gap-4">
+            <Link href="/owner-site" className="text-emerald-800 hover:underline font-medium">
+              Owner Website &amp; Overview
+            </Link>
+            <span>Timezone: Asia/Manila (GMT+8)</span>
+          </div>
         </div>
       </footer>
     </div>

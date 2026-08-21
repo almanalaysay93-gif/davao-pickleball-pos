@@ -20,6 +20,25 @@ import MyBookings from "./pages/MyBookings";
 import Owner from "./pages/Owner";
 import CustomerLogin from "./pages/CustomerLogin";
 import OwnerLogin from "./pages/OwnerLogin";
+import OwnerWebsite from "./pages/OwnerWebsite";
+
+/**
+ * Detects if the app is being loaded on a dedicated owner domain or subdomain.
+ * Checks window.location.hostname for prefixes like 'owner.', 'admin.', 'venue.', 'pos.'
+ * or an explicit VITE_OWNER_DOMAIN env variable.
+ */
+export function isOwnerDomain(): boolean {
+  if (typeof window === "undefined") return false;
+  const host = window.location.hostname.toLowerCase();
+  const ownerHostEnv = (import.meta.env.VITE_OWNER_DOMAIN || "").toLowerCase();
+  if (ownerHostEnv && (host === ownerHostEnv || host.includes(ownerHostEnv))) return true;
+  return (
+    host.startsWith("owner.") ||
+    host.startsWith("admin.") ||
+    host.startsWith("venue.") ||
+    host.startsWith("pos.")
+  );
+}
 
 /** Customer-facing app shell: booking, courts, schedule, personal bookings. */
 function CustomerApp() {
@@ -36,6 +55,7 @@ function CustomerApp() {
         <Route path={"/my-bookings"} component={MyBookings} />
         <Route path={"/booking-policy"} component={BookingPolicy} />
         <Route path={"/customer-login"} component={CustomerLogin} />
+        <Route path={"/owner-site"} component={OwnerWebsite} />
         <Route path={"/owner"}>{() => <Redirect to={"/owner-app"} />}</Route>
         <Route path={"/admin"}>{() => <Redirect to={"/owner-app/admin"} />}</Route>
         <Route path={"/404"} component={NotFound} />
@@ -61,12 +81,22 @@ function OwnerApp() {
 }
 
 function Router() {
+  const ownerHost = isOwnerDomain();
+
   return (
     <Switch>
+      <Route path={"/owner-site"} component={OwnerWebsite} />
+      <Route path={"/owner-login"}>{() => <OwnerLogin />}</Route>
       <Route path={"/owner-app/:rest*"}>{() => <OwnerApp />}</Route>
-        <Route path={"/owner-login"}>{() => <OwnerLogin />}</Route>
-        <Route path={"/owner-app"}>{() => <OwnerApp />}</Route>
+      <Route path={"/owner-app"}>{() => <OwnerApp />}</Route>
+      {ownerHost ? (
+        <>
+          <Route path={"/"} component={OwnerWebsite} />
+          <Route>{() => <CustomerApp />}</Route>
+        </>
+      ) : (
         <Route>{() => <CustomerApp />}</Route>
+      )}
     </Switch>
   );
 }
